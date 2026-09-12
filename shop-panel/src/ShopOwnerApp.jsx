@@ -6,7 +6,7 @@ import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 
 // ✅ BASE URL UPDATE (AWS)
-const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
 
 export default function ShopOwnerApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {

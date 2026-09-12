@@ -10,7 +10,7 @@ import CustomerSupportChat from './components/CustomerSupportChat';
 import OrderChatModal from './components/OrderChatModal'; 
 
 // ✅ BASE URL UPDATE (AWS)
-const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
 
 // --- CUSTOM ANIMATED BIKE ICON FOR LEAFLET MAP ---
 const getAnimatedBikeIcon = (rotationAngle) => {

@@ -12,7 +12,7 @@ import 'leaflet/dist/leaflet.css';
 import deleteIcon from 'leaflet/dist/images/marker-icon.png';
 import deleteShadow from 'leaflet/dist/images/marker-shadow.png';
 
-const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
 
 let DefaultIcon = L.icon({
     iconUrl: deleteIcon,
