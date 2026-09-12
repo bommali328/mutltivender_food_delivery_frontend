@@ -8,6 +8,7 @@ import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet
 import 'leaflet/dist/leaflet.css';
 import CustomerSupportChat from './components/CustomerSupportChat';
 import OrderChatModal from './components/OrderChatModal'; 
+import logo from './assets/logo.png'; 
 
 // ✅ BASE URL UPDATE (AWS)
 const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
@@ -1270,8 +1271,8 @@ export default function CustomerApp() {
               <div className="text-center space-y-3">
                 <div className="w-20 h-20 mx-auto rounded-3xl p-1 bg-gradient-to-tr from-[#fc8019] to-amber-400 shadow-xl shadow-orange-500/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
                   <div className="w-full h-full bg-slate-950 rounded-[22px] overflow-hidden flex items-center justify-center">
-                    <img src="/src/assets/logo.png" alt="Foodiee Logo" className="w-full h-full object-cover" />
-                  </div>
+              <img src={logo} alt="Foodiee Logo" className="w-full h-full object-cover" />
+              </div>
                 </div>
                 
                 <div className="space-y-1">
@@ -1376,9 +1377,9 @@ export default function CustomerApp() {
                   onClick={() => { setActiveTab('home'); setSelectedCategory(null); setSelectedShop(null); setIsPaymentScreen(false); setActiveTrackingOrder(null); }}
                   className="flex items-center gap-2 text-left cursor-pointer group"
                 >
-                  <div className="w-9 h-9 rounded-2xl overflow-hidden shadow-lg border-2 border-[#fc8019] flex items-center justify-center transform group-hover:scale-105 transition-transform">
-                    <img src="/src/assets/logo.png" alt="Foodiee Logo" className="w-full h-full object-cover" />
-                  </div>
+                  <div className="w-full h-full bg-slate-950 rounded-[22px] overflow-hidden flex items-center justify-center">
+                  <img src={logo} alt="Foodiee Logo" className="w-full h-full object-cover" />
+                </div>
                   <div>
                     <h1 className="text-base font-black tracking-wider bg-gradient-to-r from-[#fc8019] via-amber-500 to-yellow-400 bg-clip-text text-transparent drop-shadow-sm">
                       Foodiee

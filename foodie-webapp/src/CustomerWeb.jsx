@@ -30,26 +30,26 @@ export default function CustomerWeb() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const foodRes = await fetch("http://localhost:8080/api/food/all");
+        const foodRes = await fetch("axios.get(`${API_BASE_URL}/api/food/all`);");
         if (foodRes.ok) {
           const foodData = await foodRes.json();
           setBackendFoodItems(foodData);
         }
 
-        const shopRes = await fetch("http://localhost:8080/api/shop/all");
+        const shopRes = await fetch("axios.get(`${API_BASE_URL}/api/shop/all");
         if (shopRes.ok) {
           const shopData = await shopRes.json();
           setAllShops(shopData);
         }
 
         if (phone) {
-          const orderRes = await fetch(`http://localhost:8080/api/orders/customer/${phone}`);
+          const orderRes = await fetch(`${API_BASE_URL}/api/orders/customer/${phone}`);
           if (orderRes.ok) {
             const orderData = await orderRes.json();
             setBackendOrders(orderData);
           }
 
-          const profileRes = await fetch(`http://localhost:8080/api/users/profile/${phone}`);
+          const profileRes = await fetch(`${API_BASE_URL}/api/orders/customer/${phone}`);
           if (profileRes.ok) {
             const profileData = await profileRes.json();
             if (profileData.profilePhoto) {
@@ -121,7 +121,7 @@ export default function CustomerWeb() {
 
     try {
       toast.loading('Uploading profile photo...');
-      const response = await fetch("http://localhost:8080/api/users/upload-photo", {
+      const response = await fetch("`${API_BASE_URL}/api/users/upload-photo`", {
         method: "POST",
         body: formData,
       });
@@ -258,7 +258,7 @@ export default function CustomerWeb() {
     };
 
     try {
-      const response = await fetch("http://localhost:8080/api/address/save", {
+      const response = await fetch("${API_BASE_URL}/api/address/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -399,7 +399,7 @@ export default function CustomerWeb() {
     };
 
     try {
-      const res = await fetch("http://localhost:8080/api/payments/process", {
+      const res = await fetch("${API_BASE_URL}/api/payments/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(paymentPayload),
@@ -489,7 +489,7 @@ export default function CustomerWeb() {
     };
 
     try {
-      const response = await fetch("http://localhost:8080/api/orders/place", {
+      const response = await fetch("${API_BASE_URL}/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newOrderPayload),
@@ -508,7 +508,7 @@ export default function CustomerWeb() {
             shopId: selectedShop ? selectedShop.id : 1
           };
 
-          await fetch("http://localhost:8080/api/payments/process", {
+          await fetch("`${API_BASE_URL}/api/payments/process`", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(debitPayload),
@@ -534,7 +534,7 @@ export default function CustomerWeb() {
             shopId: selectedShop ? selectedShop.id : 1
           };
 
-          await fetch("http://localhost:8080/api/payments/process", {
+          await fetch("`${API_BASE_URL}/api/payments/process`", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(rzpPayload),
@@ -1507,7 +1507,7 @@ export default function CustomerWeb() {
                   <div className="space-y-4 max-w-2xl mx-auto text-xs">
                     <div className="flex justify-between items-center">
                       <h3 className="font-black text-gray-400 uppercase">My Orders & Live Status</h3>
-                      <button onClick={() => { if (phone) { fetch(`http://localhost:8080/api/orders/customer/${phone}`).then(res => res.json()).then(data => setBackendOrders(data)); toast.success('Refreshed!'); } }} className="text-xs bg-slate-800 text-amber-400 px-3 py-1.5 rounded-xl border border-slate-700">Refresh 🔄</button>
+                      <button onClick={() => { if (phone) { fetch(`${API_BASE_URL}/api/orders/customer/${phone}`).then(res => res.json()).then(data => setBackendOrders(data)); toast.success('Refreshed!'); } }} className="text-xs bg-slate-800 text-amber-400 px-3 py-1.5 rounded-xl border border-slate-700">Refresh 🔄</button>
                     </div>
 
                     {backendOrders.length === 0 ? (
