@@ -9,6 +9,9 @@ import 'leaflet/dist/leaflet.css';
 import CustomerSupportChat from './components/CustomerSupportChat';
 import OrderChatModal from './components/OrderChatModal'; 
 
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 // --- CUSTOM ANIMATED BIKE ICON FOR LEAFLET MAP ---
 const getAnimatedBikeIcon = (rotationAngle) => {
   return new L.DivIcon({
@@ -132,7 +135,7 @@ export default function CustomerApp() {
   const canvasRef = useRef(null);
 
   // --- ORDER CHAT STATES ---
-  const [activeChatRecipient, setActiveChatRecipient] = useState(null); // 'partner' లేదా 'shop'
+  const [activeChatRecipient, setActiveChatRecipient] = useState(null); 
 
   // --- BACKEND DYNAMIC FOOD, SHOPS & ORDERS STATE WITH AUTO POLLING ---
   const [backendFoodItems, setBackendFoodItems] = useState([]);
@@ -159,7 +162,7 @@ export default function CustomerApp() {
   useEffect(() => {
     const fetchActivePromos = async () => {
       try {
-        const res = await fetch("http://localhost:8080/api/promos/active");
+        const res = await fetch(`${API_BASE_URL}/api/promos/active`);
         if (res.ok) {
           const promos = await res.json();
           if (promos && promos.length > 0) {
@@ -194,13 +197,12 @@ export default function CustomerApp() {
     return () => clearInterval(interval);
   }, []);
 
-  // --- WEBSOCKET LIVE UNREAD NOTIFICATION SYNC ---
   // --- WEBSOCKET LIVE BROADCAST & SUPPORT CHAT SYNC ---
   useEffect(() => {
     const userMob = phone || localStorage.getItem('userMobile');
     if (!userMob) return;
 
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       onConnect: () => {
@@ -221,7 +223,7 @@ export default function CustomerApp() {
               <p className="font-black text-amber-400 text-xs">📢 Foodiee ప్రత్యేక ప్రకటన</p>
               <p className="text-xs text-white">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-24 object-cover rounded-xl mt-1 shadow" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-24 object-cover rounded-xl mt-1 shadow" />
               )}
             </div>
           ), { duration: 6000 });
@@ -234,7 +236,7 @@ export default function CustomerApp() {
               <p className="font-black text-amber-400 text-xs">📢 కస్టమర్ స్పెషల్ అలర్ట్</p>
               <p className="text-xs text-white">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-24 object-cover rounded-xl mt-1 shadow" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-24 object-cover rounded-xl mt-1 shadow" />
               )}
             </div>
           ), { duration: 6000 });
@@ -249,13 +251,13 @@ export default function CustomerApp() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const foodRes = await fetch("http://localhost:8080/api/food/all");
+        const foodRes = await fetch(`${API_BASE_URL}/api/food/all`);
         if (foodRes.ok) {
           const foodData = await foodRes.json();
           setBackendFoodItems(foodData);
         }
 
-        const shopRes = await fetch("http://localhost:8080/api/shop/all");
+        const shopRes = await fetch(`${API_BASE_URL}/api/shop/all`);
         if (shopRes.ok) {
           const shopData = await shopRes.json();
           setAllShops(shopData);
@@ -263,13 +265,13 @@ export default function CustomerApp() {
 
         const userMob = phone || localStorage.getItem('userMobile');
         if (userMob && userMob.length === 10) {
-          const orderRes = await fetch(`http://localhost:8080/api/orders/customer/${userMob}`);
+          const orderRes = await fetch(`${API_BASE_URL}/api/orders/customer/${userMob}`);
           if (orderRes.ok) {
             const orderData = await orderRes.json();
             setBackendOrders(orderData);
           }
 
-          const profileRes = await fetch(`http://localhost:8080/api/users/profile/${userMob}`);
+          const profileRes = await fetch(`${API_BASE_URL}/api/users/profile/${userMob}`);
           if (profileRes.ok) {
             const profileData = await profileRes.json();
             if (profileData.profilePhoto) {
@@ -304,7 +306,7 @@ export default function CustomerApp() {
   useEffect(() => {
     if (!activeTrackingOrder) return;
 
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       onConnect: () => {
@@ -361,7 +363,7 @@ export default function CustomerApp() {
 
     try {
       toast.loading('Uploading profile photo...');
-      const response = await fetch("http://localhost:8080/api/users/upload-photo", {
+      const response = await fetch(`${API_BASE_URL}/api/users/upload-photo`, {
         method: "POST",
         body: formData,
       });
@@ -523,7 +525,7 @@ export default function CustomerApp() {
     };
 
     try {
-      const response = await fetch("http://localhost:8080/api/address/save", {
+      const response = await fetch(`${API_BASE_URL}/api/address/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -664,7 +666,7 @@ export default function CustomerApp() {
     };
 
     try {
-      const res = await fetch("http://localhost:8080/api/payments/process", {
+      const res = await fetch(`${API_BASE_URL}/api/payments/process`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(paymentPayload),
@@ -719,7 +721,7 @@ export default function CustomerApp() {
     const fullMobile = `+91${phone}`;
 
     try {
-      const response = await fetch('http://localhost:8080/api/auth/send-otp', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile: fullMobile, role: 'customer' }),
@@ -742,7 +744,7 @@ export default function CustomerApp() {
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:8080/api/auth/verify-otp", {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mobile: phone, otp: otpInput, role: "customer" }),
@@ -814,7 +816,7 @@ export default function CustomerApp() {
     };
 
     try {
-      const response = await fetch("http://localhost:8080/api/orders/place", {
+      const response = await fetch(`${API_BASE_URL}/api/orders/place`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newOrderPayload),
@@ -841,7 +843,7 @@ export default function CustomerApp() {
             shopId: selectedShop ? selectedShop.id : 1
           };
 
-          await fetch("http://localhost:8080/api/payments/process", {
+          await fetch(`${API_BASE_URL}/api/payments/process`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(debitPayload),
@@ -867,7 +869,7 @@ export default function CustomerApp() {
             shopId: selectedShop ? selectedShop.id : 1
           };
 
-          await fetch("http://localhost:8080/api/payments/process", {
+          await fetch(`${API_BASE_URL}/api/payments/process`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(rzpPayload),
@@ -1128,7 +1130,7 @@ export default function CustomerApp() {
                       setEditProfileName(newName);
                       setAddress(prev => ({ ...prev, name: newName }));
                       try {
-                        await fetch("http://localhost:8080/api/user/update-profile", {
+                        await fetch(`${API_BASE_URL}/api/user/update-profile`, {
                           method: "PUT",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ mobile: address.mobile || phone, name: newName })
@@ -1180,7 +1182,7 @@ export default function CustomerApp() {
                 onClick={async () => {
                   setAddress(prev => ({ ...prev, name: editProfileName }));
                   try {
-                    await fetch("http://localhost:8080/api/user/update-profile", {
+                    await fetch(`${API_BASE_URL}/api/user/update-profile`, {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ mobile: address.mobile || phone, name: editProfileName })
@@ -1596,28 +1598,28 @@ export default function CustomerApp() {
               </div>
             )}
 
-            {/* FLOATING SUPPORT CHAT BUTTON WITH UNREAD COUNT & BLINKING DOT */}
-           <div className="absolute bottom-20 right-4 z-40">
-  <button 
-    onClick={() => {
-      setIsSupportChatOpen(true);
-      setUnreadSupportCount(0); // చాట్ ఓపెన్ చేయగానే కౌంట్ రీసెట్ అవుతుంది
-    }}
-    className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform relative"
-    title="Chat with Support"
-  >
-    <MessageCircle size={20} />
+            {/* FLOATING SUPPORT CHAT BUTTON WITH UNREAD COUNT & BLINKING DOT[cite: 2] */}
+            <div className="absolute bottom-20 right-4 z-40">
+              <button 
+                onClick={() => {
+                  setIsSupportChatOpen(true);
+                  setUnreadSupportCount(0); 
+                }}
+                className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center cursor-pointer hover:scale-110 transition-transform relative"
+                title="Chat with Support"
+              >
+                <MessageCircle size={20} />
 
-    {unreadSupportCount > 0 && (
-      <>
-        <span className="absolute -top-1 -right-1 bg-red-600 text-white font-black text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-900 shadow-lg">
-          {unreadSupportCount}
-        </span>
-        <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-yellow-400 border-2 border-slate-900 rounded-full animate-ping"></span>
-      </>
-    )}
-  </button>
-</div>
+                {unreadSupportCount > 0 && (
+                  <>
+                    <span className="absolute -top-1 -right-1 bg-red-600 text-white font-black text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-900 shadow-lg">
+                      {unreadSupportCount}
+                    </span>
+                    <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-yellow-400 border-2 border-slate-900 rounded-full animate-ping"></span>
+                  </>
+                )}
+              </button>
+            </div>
 
             {/* --- REAL-TIME ORDER CHAT MODAL --- */}
             {activeChatRecipient && activeTrackingOrder && (
@@ -2420,7 +2422,7 @@ export default function CustomerApp() {
                 <div className="space-y-3 text-xs">
                   <div className="flex justify-between items-center">
                     <h3 className="font-black text-gray-400 uppercase">My Orders & Live Status (Latest on Top)</h3>
-                    <button onClick={() => { const userMob = phone || localStorage.getItem('userMobile'); if (userMob) { fetch(`http://localhost:8080/api/orders/customer/${userMob}`).then(res => res.json()).then(data => setBackendOrders(data)); toast.success('Refreshed!'); } }} className="text-[10px] bg-slate-800 text-amber-400 px-2.5 py-1 rounded-lg border border-slate-700">Refresh 🔄</button>
+                    <button onClick={() => { const userMob = phone || localStorage.getItem('userMobile'); if (userMob) { fetch(`${API_BASE_URL}/api/orders/customer/${userMob}`).then(res => res.json()).then(data => setBackendOrders(data)); toast.success('Refreshed!'); } }} className="text-[10px] bg-slate-800 text-amber-400 px-2.5 py-1 rounded-lg border border-slate-700">Refresh 🔄</button>
                   </div>
 
                   {backendOrders.length === 0 ? (

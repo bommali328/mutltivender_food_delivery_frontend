@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { Send, Image as ImageIcon, Bell, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 export default function AdminBroadcast() {
   const [targetAudience, setTargetAudience] = useState('All Users');
   const [message, setMessage] = useState('');
@@ -38,7 +41,7 @@ export default function AdminBroadcast() {
 
     try {
       toast.loading('Broadcasting notification...');
-      const response = await fetch("http://localhost:8080/api/notifications/broadcast", {
+      const response = await fetch(`${API_BASE_URL}/api/notifications/broadcast`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

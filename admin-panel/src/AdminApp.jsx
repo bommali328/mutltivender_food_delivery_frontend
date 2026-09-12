@@ -12,6 +12,8 @@ import 'leaflet/dist/leaflet.css';
 import deleteIcon from 'leaflet/dist/images/marker-icon.png';
 import deleteShadow from 'leaflet/dist/images/marker-shadow.png';
 
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 let DefaultIcon = L.icon({
     iconUrl: deleteIcon,
     shadowUrl: deleteShadow,
@@ -75,7 +77,7 @@ export default function AdminApp() {
     fetchAllAdminData();
     const interval = setInterval(fetchAllAdminData, 4000);
 
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       debug: () => {},
@@ -116,7 +118,7 @@ export default function AdminApp() {
               <p className="font-black text-amber-400 text-xs">📢 అడ్మిన్ బ్రాడ్‌కాస్ట్ అలర్ట్</p>
               <p className="text-xs text-white">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1" />
               )}
             </div>
           ), { duration: 6000 });
@@ -134,7 +136,7 @@ export default function AdminApp() {
 
   const fetchAllAdminData = async () => {
     try {
-      const shopRes = await fetch("http://localhost:8080/api/shop/all");
+      const shopRes = await fetch(`${API_BASE_URL}/api/shop/all`);
       if (shopRes.ok) {
         const shops = await shopRes.json();
         setShopsList(shops);
@@ -148,10 +150,10 @@ export default function AdminApp() {
         })));
       }
 
-      const partnerRes = await fetch("http://localhost:8080/api/admin/partners/all");
+      const partnerRes = await fetch(`${API_BASE_URL}/api/admin/partners/all`);
       if (partnerRes.ok) setPartners(await partnerRes.json());
 
-      const orderRes = await fetch("http://localhost:8080/api/orders/all");
+      const orderRes = await fetch(`${API_BASE_URL}/api/orders/all`);
       if (orderRes.ok) {
         const orders = await orderRes.json();
         setAllOrders(orders);
@@ -180,10 +182,10 @@ export default function AdminApp() {
         setDailyCommissionLog(Object.values(dailyMap));
       }
 
-      const custRes = await fetch("http://localhost:8080/api/admin/customers/all");
+      const custRes = await fetch(`${API_BASE_URL}/api/admin/customers/all`);
       if (custRes.ok) setCustomersList(await custRes.json());
 
-      const promoRes = await fetch("http://localhost:8080/api/promos/active");
+      const promoRes = await fetch(`${API_BASE_URL}/api/promos/active`);
       if (promoRes.ok) setPromoCodes(await promoRes.json());
 
     } catch (error) {
@@ -194,7 +196,7 @@ export default function AdminApp() {
   const handleShopClick = async (shop) => {
     setSelectedShopForMenu(shop);
     try {
-      const res = await fetch(`http://localhost:8080/api/food/shop/${shop.id}`);
+      const res = await fetch(`${API_BASE_URL}/api/food/shop/${shop.id}`);
       if (res.ok) setShopMenuData(await res.json());
       else setShopMenuData([]);
     } catch (err) {
@@ -234,7 +236,7 @@ export default function AdminApp() {
       const promoObj = { code: newCode.toUpperCase(), discount: newDiscount, minOrder: `₹ ${newMinOrder}`, isActive: true };
       
       try {
-        const res = await fetch("http://localhost:8080/api/admin/promos/save", {
+        const res = await fetch(`${API_BASE_URL}/api/admin/promos/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(promoObj)
@@ -267,7 +269,7 @@ export default function AdminApp() {
     );
 
     try {
-      await fetch(`http://localhost:8080/api/admin/promos/toggle/${target.id || target.code}`, {
+      await fetch(`${API_BASE_URL}/api/admin/promos/toggle/${target.id || target.code}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: newStatus })
@@ -289,7 +291,7 @@ export default function AdminApp() {
       }
 
       try {
-        await fetch("http://localhost:8080/api/admin/broadcast", {
+        await fetch(`${API_BASE_URL}/api/admin/broadcast`, {
           method: "POST",
           body: formData
         });

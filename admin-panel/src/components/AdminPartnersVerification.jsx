@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Users, ShieldCheck, CheckCircle2, XCircle, FileText, Download, Eye, ChevronLeft, ChevronRight, Phone, AlertCircle } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 export default function AdminPartnersVerification() {
   const [partners, setPartners] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -9,7 +12,7 @@ export default function AdminPartnersVerification() {
 
   const fetchPartners = async () => {
     try {
-      const res = await fetch("http://localhost:8080/api/admin/partners/all");
+      const res = await fetch(`${API_BASE_URL}/api/admin/partners/all`);
       if (res.ok) {
         const data = await res.json();
         setPartners(data);
@@ -27,7 +30,7 @@ export default function AdminPartnersVerification() {
 
   const handleVerifyKyc = async (id, status) => {
     try {
-      const res = await fetch(`http://localhost:8080/api/admin/partners/verify-kyc/${id}?status=${encodeURIComponent(status)}`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/partners/verify-kyc/${id}?status=${encodeURIComponent(status)}`, {
         method: "PUT"
       });
       if (res.ok) {
@@ -44,7 +47,7 @@ export default function AdminPartnersVerification() {
   // 👈 బైనరీ కోడ్ సమస్య రాకుండా సేఫ్‌గా ఫైల్ డౌన్‌లోడ్ చేసే ఫంక్షన్
  const handleDownload = async (fileUrl, title) => {
   try {
-    const fullUrl = fileUrl.startsWith('http') ? fileUrl : `http://localhost:8080${fileUrl}`;
+    const fullUrl = fileUrl.startsWith('http') ? fileUrl : `${API_BASE_URL}${fileUrl}`;
     
     // 👈 సర్వర్ నుండి బైనరీ/స్ట్రీమ్ డేటాను ఫెచ్ చేయడం
     const response = await fetch(fullUrl);
@@ -196,7 +199,7 @@ export default function AdminPartnersVerification() {
                     {doc.url ? (
                       <div className="flex gap-1.5 pt-1">
                         <button 
-                          onClick={() => setSelectedDocModal({ title: doc.title, url: doc.url.startsWith('http') ? doc.url : `http://localhost:8080${doc.url}` })}
+                          onClick={() => setSelectedDocModal({ title: doc.title, url: doc.url.startsWith('http') ? doc.url : `${API_BASE_URL}${doc.url}` })}
                           className="flex-1 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white py-1.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-1 transition cursor-pointer"
                         >
                           <Eye size={12} /> View

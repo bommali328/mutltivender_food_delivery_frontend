@@ -4,6 +4,9 @@ import { Stomp } from "@stomp/stompjs";
 import axios from "axios";
 import { Send, Image as ImageIcon, Paperclip, X, ShieldCheck } from "lucide-react";
 
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 export default function CustomerSupportChat({ customerMobile, customerName, onClose }) {
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState("");
@@ -11,18 +14,17 @@ export default function CustomerSupportChat({ customerMobile, customerName, onCl
   const stompClientRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // ఎప్పటికప్పుడు localStorage నుండి లేటెస్ట్ పేరు మరియు మొబైల్ నంబర్ తీసుకోవడం
   const mobileNumber = customerMobile || localStorage.getItem('userMobile') || '9876543210';
   const currentUserName = customerName || localStorage.getItem('userName') || 'Customer';
 
   useEffect(() => {
     // 1. Fetch Chat History
-    axios.get(`http://localhost:8080/api/chat/history/${mobileNumber}`)
+    axios.get(`${API_BASE_URL}/api/chat/history/${mobileNumber}`)
       .then((res) => setMessages(res.data))
       .catch((err) => console.error("Error fetching chat history", err));
 
     // 2. Connect WebSocket
-    const socket = new SockJS("http://localhost:8080/ws-foodiee");
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = Stomp.over(socket);
     stompClient.debug = () => {};
     stompClientRef.current = stompClient;
@@ -63,7 +65,6 @@ export default function CustomerSupportChat({ customerMobile, customerName, onCl
       messageContent = `<div class="space-y-2"><p>${messageInput}</p>${selectedFile.type.includes('image') ? `<img src="${selectedFile.url}" class="rounded-xl max-h-40 object-cover" />` : `<a href="${selectedFile.url}" download="${selectedFile.name}" class="text-xs underline text-amber-300">📎 ${selectedFile.name}</a>`}</div>`;
     }
 
-    // ఎప్పుడూ లేటెస్ట్ పేరుతోనే పేలోడ్ వెళ్తుంది
     const chatMessage = {
       senderMobile: mobileNumber,
       senderName: localStorage.getItem('userName') || currentUserName,

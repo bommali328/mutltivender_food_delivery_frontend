@@ -7,6 +7,9 @@ import toast, { Toaster } from 'react-hot-toast';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 const getBikeIcon = (rotationAngle) => {
   return new L.DivIcon({
     className: 'custom-bike-marker',
@@ -125,7 +128,7 @@ export default function DeliveryDashboard() {
   useEffect(() => {
     const fetchCustomerSpecificOrders = async () => {
       try {
-        const response = await fetch(`http://localhost:8080/api/orders/customer/${currentCustomerMobile}`);
+        const response = await fetch(`${API_BASE_URL}/api/orders/customer/${currentCustomerMobile}`);
         if (response.ok) {
           const data = await response.json();
           setCustomerOrders(data);
@@ -179,7 +182,7 @@ export default function DeliveryDashboard() {
     const fetchPartnerHistory = async () => {
       try {
         const currentPartnerId = localStorage.getItem('partnerId') || 1;
-        const response = await fetch(`http://localhost:8080/api/orders/partner/history/${currentPartnerId}`);
+        const response = await fetch(`${API_BASE_URL}/api/orders/partner/history/${currentPartnerId}`);
         if (response.ok) {
           const data = await response.json();
           setDeliveryHistory(data);
@@ -227,12 +230,12 @@ export default function DeliveryDashboard() {
     if (!acceptedOrder) return;
     const currentOrderId = acceptedOrder.orderId || acceptedOrder.id;
 
-    fetch(`http://localhost:8080/api/chat/history/${currentOrderId}`)
+    fetch(`${API_BASE_URL}/api/chat/history/${currentOrderId}`)
       .then(res => res.json())
       .then(data => setChatMessages(data))
       .catch(err => console.error("Error fetching chat history", err));
 
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       onConnect: () => {
@@ -271,7 +274,7 @@ export default function DeliveryDashboard() {
     };
 
     try {
-      await fetch("http://localhost:8080/api/chat/send", {
+      await fetch(`${API_BASE_URL}/api/chat/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(chatPayload)
@@ -317,7 +320,7 @@ export default function DeliveryDashboard() {
     const currentPartnerId = localStorage.getItem('partnerId') || partnerProfile.id || 1;
 
     try {
-      await fetch(`http://localhost:8080/api/partner/status/update/${currentPartnerId}?isOnline=${newStatus}`, {
+      await fetch(`${API_BASE_URL}/api/partner/status/update/${currentPartnerId}?isOnline=${newStatus}`, {
         method: "PUT"
       });
       toast.success(newStatus ? "🟢 You are now Online! Receiving orders..." : "🔴 You are now Offline!");
@@ -342,7 +345,7 @@ export default function DeliveryDashboard() {
     };
 
     try {
-      const response = await fetch("http://localhost:8080/api/auth/register", {
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -398,7 +401,7 @@ export default function DeliveryDashboard() {
   useEffect(() => {
     if (!isLoggedIn) return;
 
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
@@ -419,7 +422,7 @@ export default function DeliveryDashboard() {
               <p className="font-black text-amber-400">📢 డెలివరీ పార్ట్‌నర్ అనౌన్స్‌మెంట్</p>
               <p className="text-white font-medium">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
               )}
             </div>
           ), { duration: 6000 });
@@ -438,7 +441,7 @@ export default function DeliveryDashboard() {
               <p className="font-black text-amber-400">📢 ఫుడీ స్పెషల్ అప్‌డేట్</p>
               <p className="text-white font-medium">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
               )}
             </div>
           ), { duration: 6000 });
@@ -476,7 +479,7 @@ export default function DeliveryDashboard() {
     }
 
     try {
-      const response = await fetch("http://localhost:8080/api/auth/send-otp", {
+      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mobile: phone, role: "delivery" }),
@@ -508,7 +511,7 @@ export default function DeliveryDashboard() {
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:8080/api/auth/verify-otp", {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -580,7 +583,7 @@ export default function DeliveryDashboard() {
     if (selectedDriverFile) formData.append("driverPhotoFile", selectedDriverFile);
 
     try {
-      const response = await fetch(`http://localhost:8080/api/partner/update-with-docs/${partnerProfile.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/partner/update-with-docs/${partnerProfile.id}`, {
         method: "PUT",
         body: formData 
       });
@@ -609,7 +612,7 @@ export default function DeliveryDashboard() {
       const realId = orderObj.id || orderObj.orderId || 1;
       const currentPartnerId = localStorage.getItem('partnerId') || partnerProfile.id || 1;
 
-      const response = await fetch(`http://localhost:8080/api/orders/accept/${realId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/orders/accept/${realId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -681,7 +684,7 @@ export default function DeliveryDashboard() {
     setAcceptedOrder(prev => ({ ...prev, status: nextStatus }));
     
     try {
-      await fetch(`http://localhost:8080/api/orders/status/${orderId}?status=${nextStatus}`, {
+      await fetch(`${API_BASE_URL}/api/orders/status/${orderId}?status=${nextStatus}`, {
         method: "PUT"
       });
     } catch (err) {
@@ -694,7 +697,7 @@ export default function DeliveryDashboard() {
   const verifyDelivery = async (orderId, enteredOtpCode) => {
     try {
       const currentPartnerId = localStorage.getItem('partnerId') || 1;
-      const res = await fetch(`http://localhost:8080/api/orders/verify-delivery/${orderId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/orders/verify-delivery/${orderId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -740,7 +743,7 @@ export default function DeliveryDashboard() {
       const realOrderId = acceptedOrder.id || acceptedOrder.orderId;
 
       try {
-        await fetch(`http://localhost:8080/api/orders/status/${realOrderId}?status=COMPLETED`, {
+        await fetch(`${API_BASE_URL}/api/orders/status/${realOrderId}?status=COMPLETED`, {
           method: "PUT"
         });
 

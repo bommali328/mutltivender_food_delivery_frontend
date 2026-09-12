@@ -5,6 +5,9 @@ import toast, { Toaster } from 'react-hot-toast';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
 export default function ShopOwnerApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     return localStorage.getItem('shopLoggedIn') === 'true';
@@ -160,7 +163,7 @@ export default function ShopOwnerApp() {
   const handleSaveBankDetails = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`http://localhost:8080/api/shop/bank-details/${shopId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/shop/bank-details/${shopId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -192,7 +195,7 @@ export default function ShopOwnerApp() {
 
     setUploadingImages(true);
     try {
-      const response = await fetch(`http://localhost:8080/api/shop/update-images/${shopId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/shop/update-images/${shopId}`, {
         method: "POST",
         body: formData
       });
@@ -261,13 +264,13 @@ export default function ShopOwnerApp() {
     const currentOrderId = activeChatOrder.orderId || activeChatOrder.id;
 
     // 1. Fetch Chat History
-    fetch(`http://localhost:8080/api/chat/history/${currentOrderId}`)
+    fetch(`${API_BASE_URL}/api/chat/history/${currentOrderId}`)
       .then(res => res.json())
       .then(data => setChatMessages(data))
       .catch(err => console.error("Error fetching chat history", err));
 
     // 2. Connect WebSocket
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       onConnect: () => {
@@ -305,7 +308,7 @@ export default function ShopOwnerApp() {
     };
 
     try {
-      await fetch("http://localhost:8080/api/chat/send", {
+      await fetch(`${API_BASE_URL}/api/chat/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(chatPayload)
@@ -318,7 +321,7 @@ export default function ShopOwnerApp() {
 
   const fetchMenuItems = async (currentShopId) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/food/shop/${currentShopId}`);
+      const response = await fetch(`${API_BASE_URL}/api/food/shop/${currentShopId}`);
       if (response.ok) {
         const data = await response.json();
         setMenuItems(data || []);
@@ -332,7 +335,7 @@ export default function ShopOwnerApp() {
 
   const fetchPayments = async (currentShopId) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/payments/shop/${currentShopId}`);
+      const response = await fetch(`${API_BASE_URL}/api/payments/shop/${currentShopId}`);
       if (response.ok) {
         const data = await response.json();
         setPaymentHistory(data);
@@ -344,7 +347,7 @@ export default function ShopOwnerApp() {
 
   const fetchShopOrders = async () => {
     try {
-      const response = await fetch(`http://localhost:8080/api/orders/shop/${shopId}`);
+      const response = await fetch(`${API_BASE_URL}/api/orders/shop/${shopId}`);
       if (response.ok) {
         const data = await response.json();
         const sortedData = data.sort((a, b) => b.id - a.id);
@@ -367,7 +370,7 @@ export default function ShopOwnerApp() {
 
     fetchShopOrders();
 
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000, 
@@ -391,7 +394,7 @@ export default function ShopOwnerApp() {
               <p className="font-black text-amber-400">📢 షాప్ ఓనర్ అనౌన్స్‌మెంట్</p>
               <p className="text-white font-medium">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
               )}
             </div>
           ), { duration: 6000 });
@@ -406,7 +409,7 @@ export default function ShopOwnerApp() {
               <p className="font-black text-amber-400">📢 ఫుడీ స్పెషల్ అప్‌డేట్</p>
               <p className="text-white font-medium">{broadcastData.message}</p>
               {broadcastData.imageUrl && (
-                <img src={`http://localhost:8080/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
+                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
               )}
             </div>
           ), { duration: 6000 });
@@ -426,7 +429,7 @@ export default function ShopOwnerApp() {
     }
     const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
     try {
-      const response = await fetch('http://localhost:8080/api/auth/send-otp', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile: fullMobile, role: 'shop' }),
@@ -456,7 +459,7 @@ export default function ShopOwnerApp() {
     e.preventDefault();
     const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
     try {
-      const response = await fetch('http://localhost:8080/api/auth/verify-otp', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile: fullMobile, otp: otpInput, role: 'shop' }),
@@ -525,7 +528,7 @@ export default function ShopOwnerApp() {
     }
     const fullMobile = regMobile.startsWith('+91') ? regMobile : `+91${regMobile}`;
     try {
-      const response = await fetch(`http://localhost:8080/api/shop/register?ownerId=${ownerId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/shop/register?ownerId=${ownerId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -553,7 +556,7 @@ export default function ShopOwnerApp() {
   const updateProfileDetails = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`http://localhost:8080/api/shop/profile/${shopId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/shop/profile/${shopId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -600,7 +603,7 @@ export default function ShopOwnerApp() {
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/orders/status/${orderId}?status=${encodeURIComponent(newStatus)}`, {
+      const response = await fetch(`${API_BASE_URL}/api/orders/status/${orderId}?status=${encodeURIComponent(newStatus)}`, {
         method: 'PUT',
       });
 
@@ -654,7 +657,7 @@ export default function ShopOwnerApp() {
     if (newItemName.trim() && newItemPrice.trim()) {
       try {
         const finalImageUrl = newItemImages && newItemImages.trim() !== '' ? newItemImages : '';
-        const response = await fetch(`http://localhost:8080/api/food/add/${shopId}`, {
+        const response = await fetch(`${API_BASE_URL}/api/food/add/${shopId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -688,7 +691,7 @@ export default function ShopOwnerApp() {
   const handleUpdateItem = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`http://localhost:8080/api/food/update/${editingItem.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/food/update/${editingItem.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingItem),
@@ -1578,7 +1581,7 @@ export default function ShopOwnerApp() {
               </div>
               <div>
                 <label className="block text-[10px] opacity-70 font-bold mb-1">Description</label>
-                <input type="text" value={editingItem.description || ''} onChange={(e) => setEditingItem({...editingItem, description: e.target.value})} className={`w-full ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'} border p-2.5 rounded-xl outline-none text-xs`} />
+                <input type="text" value={editingItem.description || ''} onChange={(e) => setEditingItem({...editingItem, description: e.target.value})} className={`w-full ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'} border p-2.5 rounded-xl font-bold outline-none text-xs`} />
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded-xl font-bold cursor-pointer shadow text-white">Save Changes 💾</button>

@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, X, MessageSquare } from 'lucide-react';
+import { Send, X } from 'lucide-react';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import toast from 'react-hot-toast';
+
+// ✅ BASE URL UPDATE (AWS)
+const API_BASE_URL = "http://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
 
 export default function OrderChatModal({ orderId, userMobile, userRole, recipientRole, orderStatus, onClose }) {
   const [messages, setMessages] = useState([]);
@@ -12,13 +15,13 @@ export default function OrderChatModal({ orderId, userMobile, userRole, recipien
 
   useEffect(() => {
     // 1. పాత చాట్ హిస్టరీ తెప్పించడం
-    fetch(`http://localhost:8080/api/chat/history/${orderId}`)
+    fetch(`${API_BASE_URL}/api/chat/history/${orderId}`)
       .then(res => res.json())
       .then(data => setMessages(data))
       .catch(err => console.error("Error fetching chat history", err));
 
     // 2. WebSocket లైవ్ సింక్ కనెక్షన్
-    const socket = new SockJS('http://localhost:8080/ws-foodiee');
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       onConnect: () => {
@@ -56,7 +59,7 @@ export default function OrderChatModal({ orderId, userMobile, userRole, recipien
     };
 
     try {
-      await fetch("http://localhost:8080/api/chat/send", {
+      await fetch(`${API_BASE_URL}/api/chat/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(chatPayload)
