@@ -4,6 +4,7 @@ import { jsPDF } from 'jspdf';
 import toast, { Toaster } from 'react-hot-toast';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import logo from './assets/logo.png';
 
 // ✅ BASE URL UPDATE (AWS)
 const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
@@ -785,7 +786,7 @@ export default function ShopOwnerApp() {
             <div className="text-center my-auto space-y-4">
               <div className="w-20 h-20 mx-auto rounded-3xl p-1 bg-gradient-to-tr from-amber-500 to-orange-500 shadow-xl shadow-orange-500/30 flex items-center justify-center">
                 <div className="w-full h-full bg-slate-950 rounded-[22px] flex items-center justify-center overflow-hidden">
-                  <img src="/src/assets/logo.png" alt="Logo" className="w-full h-full object-cover" />
+                  <img src={logo} alt="Logo" className="w-full h-full object-cover" />
                 </div>
               </div>
               <div>
@@ -877,7 +878,7 @@ export default function ShopOwnerApp() {
           <div className="text-center mb-8 space-y-3">
             <div className="w-24 h-24 mx-auto rounded-[28px] p-1 bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-400 shadow-2xl shadow-orange-500/40 flex items-center justify-center">
               <div className="w-full h-full bg-slate-950 rounded-[24px] flex items-center justify-center overflow-hidden">
-                <img src="/src/assets/logo.png" alt="Logo" className="w-full h-full object-cover" />
+                <img src={logo} alt="Logo" className="w-full h-full object-cover" />
               </div>
             </div>
             <div>
