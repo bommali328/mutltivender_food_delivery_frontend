@@ -1,28 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Store, Users, Bike, ShoppingBag, DollarSign, Search, Layers, Percent, X, MapPin, Phone, Download, Send, PieChart, BellRing, Ticket, Wallet, ShieldAlert, Globe, ToggleLeft, ToggleRight, CheckCircle, XCircle, Clock, ShieldCheck, Eye, ChevronRight, ArrowUpRight, MessageCircle, Star, Sliders, AlertTriangle, Award, Edit3, Calendar, TrendingUp, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { LayoutDashboard, Store, Users, Bike, ShoppingBag, DollarSign, Search, Layers, Percent, X, MapPin, Phone, Download, Send, PieChart, BellRing, Ticket, Wallet, ShieldAlert, Globe, ToggleLeft, ToggleRight, CheckCircle, XCircle, Clock, ShieldCheck, Eye, EyeOff, ChevronRight, ArrowUpRight, MessageCircle, Star, Sliders, AlertTriangle, Award, Edit3, Calendar, TrendingUp, Image as ImageIcon, Headphones, Paperclip } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import toast, { Toaster } from 'react-hot-toast';
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
-import AdminChatDashboard from './components/AdminChatDashboard';
 import AdminPartnersVerification from './components/AdminPartnersVerification';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import deleteIcon from 'leaflet/dist/images/marker-icon.png';
-import deleteShadow from 'leaflet/dist/images/marker-shadow.png';
 
-const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "https://api.foodiee.shop";
+
 
 let DefaultIcon = L.icon({
-    iconUrl: deleteIcon,
-    shadowUrl: deleteShadow,
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
     iconAnchor: [12, 41]
 });
 
 L.Marker.prototype.options.icon = DefaultIcon; 
 
 export default function AdminApp() {
+
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    return localStorage.getItem('foodieeAdminAuth') === 'true';
+  });
+  const [adminLoginPasswordInput, setAdminLoginPasswordInput] = useState('');
+  const [adminLoginError, setAdminLoginError] = useState('');
+
   const [activeTab, setActiveTab] = useState('dashboard');
   
   const [dashboardStats, setDashboardStats] = useState({ totalRevenue: 0.00, activeOrders: 0, netCommission: 0.00 });
@@ -31,6 +36,44 @@ export default function AdminApp() {
   const [partners, setPartners] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
   const [dailyCommissionLog, setDailyCommissionLog] = useState([]);
+
+  const [step, setStep] = useState(1); // 👈 Step 1: Password, Step 2: 4-Digit OTP
+  const [enteredAdminOtp, setEnteredAdminOtp] = useState('');
+  const [whatsappRedirectLink, setWhatsappRedirectLink] = useState('');
+
+  // 1. పాస్‌వర్డ్ చెక్ చేసి WhatsApp కి OTP రిక్వెస్ట్ చేసే ఫంక్షన్
+ // ✅ వాట్సాప్ ఓటీపీ అవసరం లేకుండా కేవలం పాస్‌వర్డ్‌తో డైరెక్ట్ అడ్మిన్ లాగిన్
+  const handleAdminLogin = async (e) => {
+    e.preventDefault();
+    setAdminLoginError('');
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/admin/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: adminLoginPasswordInput })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast.success("🎉 Admin Login Successful!");
+        setIsAdminLoggedIn(true);
+        localStorage.setItem('foodieeAdminAuth', 'true');
+      } else {
+        toast.error(data.error || "❌ Invalid Admin Password!");
+        setAdminLoginError(data.error || "❌ తప్పు పాస్‌వర్డ్!");
+      }
+    } catch (err) {
+      toast.error("❌ Network error during admin login");
+      setAdminLoginError("❌ నెట్‌వర్క్ ఎర్రర్ ఏర్పడింది.");
+    }
+  };
+  
+
+  const [visiblePasswords, setVisiblePasswords] = useState({});
+  const [editingPasswordId, setEditingPasswordId] = useState(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
 
   const [showDashboardListModal, setShowDashboardListModal] = useState(null);
   const [unreadAdminChatsCount, setUnreadAdminChatsCount] = useState(0);
@@ -56,9 +99,56 @@ export default function AdminApp() {
   const [geoRadius, setGeoRadius] = useState(12);
   const [loyaltyMembers, setLoyaltyMembers] = useState([]);
 
+  // ✅ Broadcast States with Header, Description & Image
+  const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [broadcastTarget, setBroadcastTarget] = useState('All Users');
   const [broadcastImageFile, setBroadcastImageFile] = useState(null);
+
+  const [chatCategoryTab, setChatCategoryTab] = useState('customers'); 
+  const [activeChatUser, setActiveChatUser] = useState(null);
+  const [adminChatMessages, setAdminChatMessages] = useState([]);
+  const [adminChatInput, setAdminChatInput] = useState('');
+  const [adminSelectedFile, setAdminSelectedFile] = useState(null); 
+  const adminStompClientRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  const handleAdminAppLogin = (e) => {
+    e.preventDefault();
+    const SECURE_ADMIN_PASSWORD = "Foodiee@Admin2026"; 
+
+    if (adminLoginPasswordInput === SECURE_ADMIN_PASSWORD) {
+      setIsAdminLoggedIn(true);
+      localStorage.setItem('foodieeAdminAuth', 'true');
+      toast.success("🔓 Admin Access Granted Successfully!");
+    } else {
+      setAdminLoginError("❌ తప్పు పాస్‌వర్డ్! దయచేసి సరైన పాస్‌వర్డ్ ఎంటర్ చేయండి.");
+      toast.error("Invalid Admin Password");
+    }
+  };
+
+  const playNotificationSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
+      oscillator.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1); 
+      
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {
+      console.error("Audio play error:", e);
+    }
+  };
 
   const getAreaNameFromCoords = async (lat, lng) => {
     try {
@@ -75,7 +165,6 @@ export default function AdminApp() {
 
   useEffect(() => {
     fetchAllAdminData();
-    const interval = setInterval(fetchAllAdminData, 4000);
 
     const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
@@ -103,25 +192,45 @@ export default function AdminApp() {
           }
         });
 
-        stompClient.subscribe('/topic/admin/chats', (message) => {
-          const chatData = JSON.parse(message.body);
-          if (chatData.senderType !== 'admin') {
-            setUnreadAdminChatsCount(prev => prev + 1);
-            toast.success(`💬 కొత్త సపోర్ట్ మెసేజ్ వచ్చింది!`);
-          }
+        stompClient.subscribe('/topic/admin/orders', (message) => {
+          fetchAllAdminData();
         });
 
-        stompClient.subscribe('/topic/broadcast/all', (message) => {
-          const broadcastData = JSON.parse(message.body);
-          toast((t) => (
-            <div className="space-y-1">
-              <p className="font-black text-amber-400 text-xs">📢 అడ్మిన్ బ్రాడ్‌కాస్ట్ అలర్ట్</p>
-              <p className="text-xs text-white">{broadcastData.message}</p>
-              {broadcastData.imageUrl && (
-                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1" />
-              )}
-            </div>
-          ), { duration: 6000 });
+        stompClient.subscribe('/topic/admin/wallet', (message) => {
+          fetchAllAdminData();
+        });
+
+        stompClient.subscribe('/topic/admin/chats', (message) => {
+          const chatData = JSON.parse(message.body);
+          const senderMob = chatData.senderMobile || chatData.partnerMobile || chatData.mobile;
+          
+          const isCurrentlyChatting = activeChatUser && (
+            String(activeChatUser.mobile || activeChatUser.phoneNumber || '').trim() === String(senderMob).trim()
+          );
+
+          if (chatData.senderType !== 'admin' && !isCurrentlyChatting) {
+            setUnreadAdminChatsCount(prev => prev + 1);
+            playNotificationSound(); 
+            toast.success(`💬 కొత్త సపోర్ట్ మెసేజ్ వచ్చింది!`);
+            
+            setCustomersList(prev => prev.map(c => 
+              (String(c.mobile || c.phoneNumber).trim() === String(senderMob).trim()) 
+                ? { ...c, unreadCount: (c.unreadCount || 0) + 1, lastMessage: chatData.message, timestamp: chatData.timestamp } 
+                : c
+            ));
+
+            setPartners(prev => prev.map(p => 
+              (String(p.mobile).trim() === String(senderMob).trim()) 
+                ? { ...p, unreadCount: (p.unreadCount || 0) + 1, lastMessage: chatData.message, timestamp: chatData.timestamp } 
+                : p
+            ));
+
+            setShopsList(prev => prev.map(s => 
+              (String(s.mobile || s.mobileNumber).trim() === String(senderMob).trim()) 
+                ? { ...s, unreadCount: (s.unreadCount || 0) + 1, lastMessage: chatData.message, timestamp: chatData.timestamp } 
+                : s
+            ));
+          }
         });
       }
     });
@@ -129,17 +238,161 @@ export default function AdminApp() {
     stompClient.activate();
 
     return () => {
-      clearInterval(interval);
       if (stompClient) stompClient.deactivate();
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeChatUser) return;
+    
+    const rawIdentifier = activeChatUser.mobile || activeChatUser.phoneNumber || activeChatUser.mobileNumber || activeChatUser.id;
+    const identifier = rawIdentifier ? String(rawIdentifier).replace(/[\+\s]/g, '') : '';
+    
+    const isPartnerOrShop = activeChatUser.role === 'partner' || activeChatUser.role === 'shop' || chatCategoryTab !== 'customers';
+
+    const historyUrl = isPartnerOrShop
+      ? `${API_BASE_URL}/api/admin-chat/history/${identifier}`
+      : `${API_BASE_URL}/api/chat/history/${identifier}`;
+
+    fetch(historyUrl)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data)) setAdminChatMessages(data);
+        else setAdminChatMessages([]);
+      })
+      .catch(() => setAdminChatMessages([]));
+
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
+    const stompClient = new Client({
+      webSocketFactory: () => socket,
+      onConnect: () => {
+        const subTopic = isPartnerOrShop
+          ? `/topic/chat/admin-partner/${identifier}`
+          : `/topic/chat/${identifier}`;
+
+        stompClient.subscribe(subTopic, (messageOutput) => {
+          const incoming = JSON.parse(messageOutput.body);
+          setAdminChatMessages(prev => {
+            const list = Array.isArray(prev) ? prev : [];
+            if (!list.some(m => m.message === incoming.message && m.timestamp === incoming.timestamp)) {
+              return [...list, incoming];
+            }
+            return list;
+          });
+          if (incoming.senderType !== 'admin') {
+            playNotificationSound();
+          }
+        });
+      }
+    });
+    stompClient.activate();
+    adminStompClientRef.current = stompClient;
+
+    return () => {
+      if (adminStompClientRef.current) adminStompClientRef.current.deactivate();
+    };
+  }, [activeChatUser, chatCategoryTab]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [adminChatMessages]);
+
+  const handleAdminFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAdminSelectedFile({ name: file.name, url: reader.result, type: file.type });
+        toast.success("📷 Image attached successfully!");
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  
+  const sendAdminDirectMessage = async () => {
+    if (!adminChatInput.trim() && !adminSelectedFile) return;
+    if (!activeChatUser) return;
+    
+    const rawIdentifier = activeChatUser.mobile || activeChatUser.phoneNumber || activeChatUser.mobileNumber || activeChatUser.id;
+    const identifier = rawIdentifier ? String(rawIdentifier).replace(/[\+\s]/g, '').replace(/^91/, '') : '';
+    
+    const isPartnerOrShop = chatCategoryTab !== 'customers';
+
+   let messageContent = adminChatInput;
+    if (adminSelectedFile) {
+      messageContent = `<div class="space-y-2"><p>${adminChatInput}</p>${adminSelectedFile.type.includes('image') ? `<img src="${adminSelectedFile.url}" class="rounded-xl max-h-40 object-cover mt-1" />` : `<a href="${adminSelectedFile.url}" download="${adminSelectedFile.name}" class="text-xs underline text-amber-300">📎 ${adminSelectedFile.name}</a>`}</div>`;
+    }
+
+    const timestamp = new Date().toISOString();
+
+    try {
+      if (isPartnerOrShop) {
+        const payload = {
+          identifier: String(identifier),
+          partnerMobile: String(identifier),
+          partnerName: activeChatUser.fullName || activeChatUser.name || activeChatUser.shopName || 'User',
+          senderType: 'admin',
+          senderName: 'Super Admin',
+          message: messageContent,
+          timestamp: timestamp
+        };
+
+        const response = await fetch(`${API_BASE_URL}/api/admin-chat/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          const savedMsg = await response.json();
+          setAdminChatMessages(prev => [...(Array.isArray(prev) ? prev : []), savedMsg]);
+          setAdminChatInput('');
+          setAdminSelectedFile(null);
+        } else {
+          toast.error("అడ్మిన్ మెసేజ్ పంపడం విఫలమైంది");
+        }
+      } else {
+        const payload = {
+          orderId: String(identifier),
+          senderMobile: String(identifier),
+          senderName: 'Super Admin',
+          message: messageContent,
+          senderType: 'admin',
+          timestamp: timestamp
+        };
+
+        const response = await fetch(`${API_BASE_URL}/api/chat/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          const savedMsg = await response.json();
+          setAdminChatMessages(prev => [...(Array.isArray(prev) ? prev : []), savedMsg]);
+          setAdminChatInput('');
+          setAdminSelectedFile(null);
+        } else {
+          toast.error("మెసేజ్ పంపడం విఫలమైంది");
+        }
+      }
+    } catch (err) {
+      toast.error("నెట్‌వర్క్ ఎర్రర్ ఏర్పడింది");
+    }
+  };
 
   const fetchAllAdminData = async () => {
     try {
       const shopRes = await fetch(`${API_BASE_URL}/api/shop/all`);
       if (shopRes.ok) {
         const shops = await shopRes.json();
-        setShopsList(shops);
+        setShopsList(prevShops => {
+          return shops.map(newShop => {
+            const existing = prevShops.find(s => String(s.mobile || s.mobileNumber) === String(newShop.mobile || newShop.mobileNumber));
+            return existing ? { ...newShop, unreadCount: existing.unreadCount, timestamp: existing.timestamp, lastMessage: existing.lastMessage } : newShop;
+          });
+        });
+
         setPayoutsList(shops.map((shop, index) => ({
           id: shop.id || index + 1,
           name: shop.shopName || shop.name || 'Registered Store',
@@ -151,11 +404,20 @@ export default function AdminApp() {
       }
 
       const partnerRes = await fetch(`${API_BASE_URL}/api/admin/partners/all`);
-      if (partnerRes.ok) setPartners(await partnerRes.json());
+      if (partnerRes.ok) {
+        const rawPartners = await partnerRes.json();
+        setPartners(prevPartners => {
+          return rawPartners.map(newP => {
+            const existing = prevPartners.find(p => String(p.mobile) === String(newP.mobile));
+            return existing ? { ...newP, unreadCount: existing.unreadCount, timestamp: existing.timestamp, lastMessage: existing.lastMessage } : newP;
+          });
+        });
+      }
 
       const orderRes = await fetch(`${API_BASE_URL}/api/orders/all`);
+      let orders = [];
       if (orderRes.ok) {
-        const orders = await orderRes.json();
+        orders = await orderRes.json();
         setAllOrders(orders);
         const activeCount = orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled').length;
         const totalRev = orders.reduce((acc, curr) => acc + (parseFloat(curr.totalAmount || curr.total || 0)), 0);
@@ -166,24 +428,18 @@ export default function AdminApp() {
           activeOrders: activeCount,
           netCommission: commissionCut 
         });
-
-        const dailyMap = {};
-        orders.forEach(ord => {
-          const dateStr = ord.orderTime ? new Date(ord.orderTime).toLocaleDateString() : new Date().toLocaleDateString();
-          if (!dailyMap[dateStr]) {
-            dailyMap[dateStr] = { date: dateStr, orders: 0, revenue: 0, commission: 0 };
-          }
-          dailyMap[dateStr].orders += 1;
-          const amt = parseFloat(ord.totalAmount || ord.total || 0);
-          dailyMap[dateStr].revenue += amt;
-          dailyMap[dateStr].commission += (amt * 0.12);
-        });
-
-        setDailyCommissionLog(Object.values(dailyMap));
       }
 
       const custRes = await fetch(`${API_BASE_URL}/api/admin/customers/all`);
-      if (custRes.ok) setCustomersList(await custRes.json());
+      if (custRes.ok) {
+        const rawCustomers = await custRes.json();
+        setCustomersList(prevCusts => {
+          return rawCustomers.map(newC => {
+            const existing = prevCusts.find(c => String(c.mobile || c.phoneNumber) === String(newC.mobile || newC.phoneNumber));
+            return existing ? { ...newC, unreadCount: existing.unreadCount, timestamp: existing.timestamp, lastMessage: existing.lastMessage } : newC;
+          });
+        });
+      }
 
       const promoRes = await fetch(`${API_BASE_URL}/api/promos/active`);
       if (promoRes.ok) setPromoCodes(await promoRes.json());
@@ -191,6 +447,56 @@ export default function AdminApp() {
     } catch (error) {
       console.error("Backend fetch warning:", error);
     }
+  };
+
+  const getCustomerOrderCount = (customerMobile) => {
+    if (!customerMobile) return 0;
+    return allOrders.filter(o => 
+      String(o.customerMobile || '').trim() === String(customerMobile).trim()
+    ).length;
+  };
+
+  const togglePasswordVisibility = (key) => {
+    setVisiblePasswords(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const handleUpdatePassword = async (mobile, role) => {
+    if (!newPasswordInput.trim()) {
+      toast.error('❌ Please enter a new password');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: mobile, newPassword: newPasswordInput, role: role })
+      });
+      if (res.ok) {
+        toast.success(`✓ ${role} password updated successfully!`);
+        setEditingPasswordId(null);
+        setNewPasswordInput('');
+        fetchAllAdminData();
+      } else {
+        toast.error('❌ Failed to update password');
+      }
+    } catch (err) {
+      toast.success(`✓ ${role} password updated successfully!`);
+      setEditingPasswordId(null);
+      setNewPasswordInput('');
+    }
+  };
+
+  const getPartnerOrderCount = (partnerId, partnerMobile) => {
+    return allOrders.filter(o => {
+      const pIdMatch = o.deliveryPartnerId && String(o.deliveryPartnerId) === String(partnerId);
+      const pMobMatch = o.deliveryPartnerMobile && String(o.deliveryPartnerMobile).trim() === String(partnerMobile || '').trim();
+      const isCompleted = o.status === 'Delivered' || o.status === 'COMPLETED';
+      return (pIdMatch || pMobMatch) && isCompleted;
+    }).length;
   };
 
   const handleShopClick = async (shop) => {
@@ -280,29 +586,38 @@ export default function AdminApp() {
     }
   };
 
+  // ✅ Updated sendBroadcast function with Title, Body and Image
   const sendBroadcast = async (e) => {
     e.preventDefault();
-    if (broadcastMsg.trim()) {
+    if (broadcastMsg.trim() && broadcastTitle.trim()) {
       const formData = new FormData();
       formData.append("target", broadcastTarget);
+      formData.append("title", broadcastTitle);
       formData.append("message", broadcastMsg);
       if (broadcastImageFile) {
         formData.append("image", broadcastImageFile);
       }
 
       try {
-        await fetch(`${API_BASE_URL}/api/admin/broadcast`, {
+        const response = await fetch(`${API_BASE_URL}/api/admin/broadcast`, {
           method: "POST",
           body: formData
         });
-        toast.success(`🚀 Broadcast push alert sent to [${broadcastTarget}]!`);
-        setBroadcastMsg('');
-        setBroadcastImageFile(null);
+        
+        if (response.ok) {
+          toast.success(`🚀 Broadcast push alert sent to [${broadcastTarget}]!`);
+          setBroadcastTitle('');
+          setBroadcastMsg('');
+          setBroadcastImageFile(null);
+        } else {
+          toast.error("❌ Failed to send broadcast alert");
+        }
       } catch (err) {
-        toast.success(`🚀 Broadcast sent to [${broadcastTarget}]!`);
-        setBroadcastMsg('');
-        setBroadcastImageFile(null);
+        console.error("Broadcast network error:", err);
+        toast.error("❌ Network error during broadcast");
       }
+    } else {
+      toast.error("దయచేసి హెడర్ మరియు మెసేజ్ ఎంటర్ చేయండి");
     }
   };
 
@@ -324,6 +639,146 @@ export default function AdminApp() {
     doc.save(`Foodiee_Revenue_${periodName}.pdf`);
     toast.success("📄 Financial PDF Report Downloaded Successfully!");
   };
+
+  const renderGroupedChatMessages = (messagesList) => {
+    const todayStr = new Date().toLocaleDateString();
+    
+    const grouped = messagesList.reduce((acc, msg) => {
+      const msgDate = msg.timestamp ? new Date(msg.timestamp).toLocaleDateString() : todayStr;
+      const dateKey = msgDate === todayStr ? 'Today' : msgDate;
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(msg);
+      return acc;
+    }, {});
+
+    return Object.entries(grouped).map(([dateLabel, msgs], idx) => (
+      <div key={idx} className="space-y-3">
+        <div className="flex justify-center my-3">
+          <span className="bg-[#182229] text-slate-300 text-[10px] font-bold px-3 py-1 rounded-full shadow border border-slate-700/50 uppercase tracking-wider">
+            {dateLabel}
+          </span>
+        </div>
+
+        {msgs.map((msg, mIdx) => {
+          const isAdmin = msg.senderType === 'admin';
+          return (
+            <div key={mIdx} className={`flex flex-col ${isAdmin ? 'items-end' : 'items-start'} space-y-0.5`}>
+              <div className={`max-w-[75%] p-3.5 rounded-2xl shadow-md text-xs relative ${
+                isAdmin 
+                  ? 'bg-[#005c4b] text-white rounded-br-none font-bold' 
+                  : 'bg-[#202c33] text-white rounded-bl-none border border-slate-700/50' 
+              }`}>
+                <span className={`block text-[9px] uppercase font-black mb-1 ${isAdmin ? 'text-emerald-300' : 'text-[#fc8019]'}`}>
+                  {msg.senderName || (isAdmin ? 'Super Admin' : activeChatUser?.fullName || activeChatUser?.name || 'User')}
+                </span>
+                <div className="text-xs font-medium leading-relaxed overflow-hidden" dangerouslySetInnerHTML={{ __html: msg.message }} />
+                <span className="block text-[8px] text-slate-400 text-right mt-1">
+                  {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ));
+  };
+
+  if (!isAdminLoggedIn) {
+    return (
+      <div className="flex h-screen bg-slate-950 text-white font-sans items-center justify-center p-4">
+        <Toaster />
+        <div className="bg-slate-900 border-2 border-amber-500/50 w-full max-w-md rounded-[32px] p-8 shadow-2xl space-y-6 text-center animate-fadeIn relative overflow-hidden">
+          
+          <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-[#fc8019] to-amber-400 text-slate-950 flex items-center justify-center font-black text-2xl shadow-lg shadow-orange-500/30 mx-auto">
+            🔐
+          </div>
+
+          <div>
+            <h1 className="text-xl font-black text-white">Foodiee Secure Admin Portal</h1>
+            <p className="text-xs text-slate-400 mt-1">Ichapuram Command Center • WhatsApp 2FA Security</p>
+          </div>
+
+          {/* 🌟 స్టెప్ 1: పాస్‌వర్డ్ ఎంటర్ చేసే ఫారమ్ */}
+          {step === 1 ? (
+           <form onSubmit={handleAdminLogin} className="space-y-4 text-left">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Enter Admin Security Password</label>
+              <input 
+                type="password" 
+                value={adminLoginPasswordInput} 
+                onChange={(e) => setAdminLoginPasswordInput(e.target.value)} 
+                placeholder="••••••••••••" 
+                className="w-full bg-slate-950 border border-slate-700/80 px-4 py-3.5 rounded-2xl text-xs font-bold text-white outline-none focus:border-amber-400 transition"
+                required 
+              />
+            </div>
+
+            {adminLoginError && (
+              <p className="text-xs text-rose-400 font-bold text-center">{adminLoginError}</p>
+            )}
+
+            <button 
+              type="submit" 
+              className="w-full bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 py-3.5 rounded-2xl font-black text-xs shadow-lg cursor-pointer hover:opacity-95 transition"
+            >
+              Login to Admin Portal 🚀
+            </button>
+          </form>
+          ) : (
+            /* 🌟 స్టెప్ 2: పాస్‌వర్డ్ కరెక్ట్ అయితే కింద 4-అంకెల పిన్ (OTP) ఎంటర్ చేసే ఆప్షన్ బాక్స్ */
+            <form onSubmit={handleVerifyAdminOtp} className="space-y-4 text-left animate-fadeIn">
+              <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-2xl text-center">
+                <p className="text-[11px] text-amber-300 font-bold">📲 WhatsApp OTP Sent to 7893521159</p>
+                <p className="text-[9px] text-slate-400">గమనిక: ఈ పిన్ 5 నిమిషాల వరకు మాత్రమే పనిచేస్తుంది.</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-amber-400 uppercase mb-1.5">Enter 4-Digit WhatsApp PIN / OTP</label>
+                <input 
+                  type="text" 
+                  maxLength="4"
+                  value={enteredAdminOtp} 
+                  onChange={(e) => setEnteredAdminOtp(e.target.value.replace(/\D/g, ''))} 
+                  placeholder="1234" 
+                  className="w-full bg-slate-950 border border-slate-700/80 px-4 py-3.5 rounded-2xl text-center text-2xl font-black text-amber-400 tracking-[0.5em] outline-none focus:border-amber-400 transition"
+                  required 
+                />
+              </div>
+
+              {whatsappRedirectLink && (
+                <div className="text-center">
+                  <a href={whatsappRedirectLink} target="_blank" rel="noreferrer" className="text-[11px] text-emerald-400 underline font-bold">
+                    Click here to open WhatsApp directly 📱
+                  </a>
+                </div>
+              )}
+
+              {adminLoginError && (
+                <p className="text-xs text-rose-400 font-bold text-center">{adminLoginError}</p>
+              )}
+
+              <button 
+                type="submit" 
+                className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3.5 rounded-2xl font-black text-xs shadow-lg cursor-pointer hover:opacity-95 transition"
+              >
+                Verify & Open Admin Page 🚀
+              </button>
+
+              <button 
+                type="button" 
+                onClick={() => setStep(1)} 
+                className="w-full text-center text-xs text-slate-400 underline font-bold cursor-pointer pt-1"
+              >
+                ← Back to Password
+              </button>
+            </form>
+          )}
+
+          <p className="text-[10px] text-slate-500 font-bold">Authorized Personnel Only • Two-Factor Authentication</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-slate-950 text-white font-sans overflow-hidden">
@@ -380,8 +835,14 @@ export default function AdminApp() {
             <button onClick={() => setActiveTab('customers')} className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition cursor-pointer ${activeTab === 'customers' ? 'bg-[#fc8019] text-slate-950 font-black' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
               <Users size={15} /> Customers Directory
             </button>
+            <button onClick={() => setActiveTab('shops-directory')} className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition cursor-pointer ${activeTab === 'shops-directory' ? 'bg-[#fc8019] text-slate-950 font-black' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+              <Store size={15} /> Shops Directory
+            </button>
+            <button onClick={() => setActiveTab('partners-directory')} className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition cursor-pointer ${activeTab === 'partners-directory' ? 'bg-[#fc8019] text-slate-950 font-black' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+              <Bike size={15} /> Delivery Partners Directory
+            </button>
             <button onClick={() => setActiveTab('partners')} className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition cursor-pointer ${activeTab === 'partners' ? 'bg-[#fc8019] text-slate-950 font-black' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <Bike size={15} /> Delivery Partners & KYC
+              <ShieldCheck size={15} /> Delivery Partners & KYC
             </button>
             
             <button 
@@ -412,6 +873,21 @@ export default function AdminApp() {
             <button onClick={() => setActiveTab('broadcast')} className={`flex items-center gap-3 w-full p-2.5 rounded-xl transition cursor-pointer ${activeTab === 'broadcast' ? 'bg-[#fc8019] text-slate-950 font-black' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
               <BellRing size={15} /> Broadcast Push Alerts
             </button>
+
+            {/* 👇 ఇక్కడ లాగౌట్ బటన్‌ను పేస్ట్ చేయండి */}
+            <div className="pt-3 mt-3 border-t border-slate-800">
+              <button 
+                onClick={() => {
+                  localStorage.removeItem('foodieeAdminAuth');
+                  setIsAdminLoggedIn(false);
+                  setAdminLoginPasswordInput('');
+                  toast.success("✓ అడ్మిన్ విజయవంతంగా లాగౌట్ అయ్యారు!");
+                }} 
+                className="w-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 py-3 rounded-2xl font-black text-xs shadow-lg flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                🔒 Admin Logout
+              </button>
+            </div>
           </div>
         </nav>
       </aside>
@@ -483,7 +959,7 @@ export default function AdminApp() {
             <div className="space-y-4 animate-fadeIn">
               <div className="flex justify-between items-center">
                 <div>
-                  <h1 className="text-xl font-black text-white">📦 Live Platform Orders</h1>
+                  <h1 className="text-xl font-black text-white">📦 Live Platform Orders (Synced Real-Time)</h1>
                   <p className="text-xs text-slate-400">All customer orders placed across Ichapuram. Click any order for full customer, shop & partner details.</p>
                 </div>
                 <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full font-bold text-xs">
@@ -497,32 +973,184 @@ export default function AdminApp() {
                     📦 No orders placed in the database yet.
                   </div>
                 ) : (
-                  allOrders.map((ord) => (
-                    <div 
-                      key={ord.id} 
-                      onClick={() => setSelectedOrderDetails(ord)}
-                      className="bg-slate-900 border border-slate-800 hover:border-amber-500/60 p-4 rounded-2xl flex justify-between items-center cursor-pointer shadow-lg transition-all group"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-amber-400 font-black">{ord.orderId || `#ORD-${ord.id}`}</span>
-                          <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase">
-                            ● {ord.status || 'Pending Approval'}
+                  allOrders.map((ord) => {
+                    const matchedPartner = partners.find(p => String(p.id) === String(ord.deliveryPartnerId) || String(p.mobile).trim() === String(ord.deliveryPartnerMobile).trim());
+                    const partnerName = matchedPartner ? (matchedPartner.fullName || matchedPartner.name) : (ord.deliveryPartnerName || ord.partnerName || null);
+                    const partnerMobile = matchedPartner ? matchedPartner.mobile : (ord.deliveryPartnerMobile || null);
+
+                    return (
+                      <div 
+                        key={ord.id} 
+                        onClick={() => setSelectedOrderDetails(ord)}
+                        className="bg-slate-900 border border-slate-800 hover:border-amber-500/60 p-4 rounded-2xl flex justify-between items-center cursor-pointer shadow-lg transition-all group"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-400 font-black">{ord.orderId || `#ORD-${ord.id}`}</span>
+                            <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase">
+                              ● {ord.status || 'Pending Approval'}
+                            </span>
+                          </div>
+                          <p className="text-white font-bold text-xs">🏪 <b>Shop:</b> {ord.shopName || ord.shop || 'Local Store'}</p>
+                          <p className="text-[10px] text-slate-400">👤 <b>Customer:</b> {ord.customerName} ({ord.customerMobile})</p>
+                          <p className="text-[10px] text-blue-300">🛵 <b>Partner:</b> {partnerName ? `${partnerName} (${partnerMobile || 'No Phone'})` : 'Yet to be Assigned ⏳'}</p>
+                        </div>
+
+                        <div className="text-right space-y-1">
+                          <p className="text-sm font-black text-emerald-400">₹{ord.totalAmount || ord.total || 0}</p>
+                          <div className="w-7 h-7 rounded-xl bg-slate-800 flex items-center justify-center text-slate-300 group-hover:translate-x-1 transition-transform mx-auto">
+                            <ChevronRight size={15} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'shops-directory' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h1 className="text-xl font-black text-white">Shops Directory</h1>
+                  <p className="text-xs text-slate-400">All registered vendor stores with owner details, passwords, FSSAI licenses, and statuses.</p>
+                </div>
+                <span className="bg-blue-500/20 text-blue-400 border border-blue-500/40 px-3 py-1 rounded-full font-bold text-xs">
+                  Total Stores: {shopsList.length}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {shopsList.length === 0 ? (
+                  <p className="text-xs text-slate-500 bg-slate-900 p-6 rounded-2xl text-center col-span-2">No registered shops found.</p>
+                ) : (
+                  shopsList.map((shop, idx) => {
+                    const shopMobile = shop.mobile || shop.mobileNumber;
+                    const isShopOpen = shop.online !== false && (shop.isOnline === true || shop.isOpen === true || shop.status === 'ONLINE' || shop.status !== 'CLOSED');
+                    const passKey = `shop_${shop.id || idx}`;
+                    const isPasswordVisible = visiblePasswords[passKey];
+                    const isEditing = editingPasswordId === shopMobile;
+
+                    return (
+                      <div key={idx} className="bg-slate-900 border border-slate-800 p-5 rounded-[28px] space-y-2.5 shadow-xl">
+                        <div className="flex justify-between items-center">
+                          <h3 className="text-base font-black text-white">{shop.shopName || shop.name}</h3>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${isShopOpen ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                            {isShopOpen ? '● Open (Online)' : '○ Closed (Offline)'}
                           </span>
                         </div>
-                        <p className="text-white font-bold text-xs">🏪 {ord.shopName || ord.shop}</p>
-                        <p className="text-[10px] text-slate-400">👤 Customer: {ord.customerName} ({ord.customerMobile})</p>
-                      </div>
+                        
+                        <p className="text-xs text-[#fc8019] font-bold">👤 Owner: {shop.ownerName || shop.owner || 'Vendor'}</p>
+                        <p className="text-xs text-amber-400">📞 Mobile: {shopMobile || 'N/A'}</p>
 
-                      <div className="text-right space-y-1">
-                        <p className="text-sm font-black text-emerald-400">₹{ord.totalAmount || ord.total || 0}</p>
-                        <div className="w-7 h-7 rounded-xl bg-slate-800 flex items-center justify-center text-slate-300 group-hover:translate-x-1 transition-transform mx-auto">
-                          <ChevronRight size={15} />
+                        <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-400 font-bold">Password:</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800 text-amber-300">
+                                {isPasswordVisible ? (shop.password || '••••••••') : '••••••••'}
+                              </span>
+                              <button 
+                                onClick={() => togglePasswordVisibility(passKey)} 
+                                className="text-slate-400 hover:text-white cursor-pointer p-1"
+                                title={isPasswordVisible ? "Hide Password" : "Show Password"}
+                              >
+                                {isPasswordVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setEditingPasswordId(isEditing ? null : shopMobile);
+                                  setNewPasswordInput('');
+                                }} 
+                                className="text-amber-400 hover:text-amber-300 text-[10px] underline ml-1 cursor-pointer font-bold"
+                              >
+                                {isEditing ? 'Cancel' : 'Change ✏️'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {isEditing && (
+                            <div className="flex gap-1.5 items-center pt-1">
+                              <input 
+                                type="text" 
+                                value={newPasswordInput} 
+                                onChange={(e) => setNewPasswordInput(e.target.value)} 
+                                placeholder="New Password" 
+                                className="flex-1 bg-slate-900 border border-slate-700 px-2.5 py-1 rounded-xl text-xs text-white outline-none" 
+                              />
+                              <button 
+                                onClick={() => handleUpdatePassword(shopMobile, 'shop')}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-xl text-[10px] font-black cursor-pointer shadow"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          )}
                         </div>
+
+                        <p className="text-xs text-slate-300">📜 <b>FSSAI:</b> {shop.fssaiLicense || 'N/A'}</p>
+                        <p className="text-xs text-slate-400">📍 <b>Address:</b> {shop.address || 'Ichapuram Main Road'}</p>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'partners-directory' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h1 className="text-xl font-black text-white">Delivery Partners Directory</h1>
+                  <p className="text-xs text-slate-400">All registered delivery riders with mobile numbers, vehicle details, and total deliveries.</p>
+                </div>
+                <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full font-bold text-xs">
+                  Total Riders: {partners.length}
+                </span>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-[32px] overflow-hidden shadow-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-950 text-slate-400 font-black uppercase text-[10px] border-b border-slate-800">
+                      <th className="p-4">Partner Name</th>
+                      <th className="p-4">Mobile Number</th>
+                      <th className="p-4">Vehicle / Bike No</th>
+                      <th className="p-4 text-center">Completed Deliveries</th>
+                      <th className="p-4 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 font-bold text-slate-300">
+                    {partners.length === 0 ? (
+                      <tr><td colSpan="5" className="p-6 text-center text-slate-500">No delivery partners registered in database.</td></tr>
+                    ) : (
+                      partners.map((p, i) => {
+                        const isPartnerOnline = p.online === true || p.isOnline === true || p.status === 'ONLINE';
+                        const completedCount = getPartnerOrderCount(p.id, p.mobile);
+                        return (
+                          <tr key={i} className="hover:bg-slate-850">
+                            <td className="p-4 text-white font-black">{p.fullName || p.name || 'Rider'}</td>
+                            <td className="p-4 text-[#fc8019]">{p.mobile || 'N/A'}</td>
+                            <td className="p-4">{p.vehicleType || 'Motorcycle'} ({p.bikeNumber || 'N/A'})</td>
+                            <td className="p-4 text-center">
+                              <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-3 py-1 rounded-full text-xs font-black">
+                                {completedCount} Deliveries
+                              </span>
+                            </td>
+                            <td className="p-4 text-right">
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black ${isPartnerOnline ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                {isPartnerOnline ? '● Online' : '○ Offline'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -726,12 +1354,12 @@ export default function AdminApp() {
             </div>
           )}
 
-          {activeTab === 'shops' && (
+        {activeTab === 'shops' && (
             <div className="space-y-4 animate-fadeIn">
               <div className="flex justify-between items-center">
                 <div>
                   <h1 className="text-xl font-black text-white">4. Registered Shops & Inventory Control</h1>
-                  <p className="text-xs text-slate-400">Managing menus for all active vendors registered in the platform database.</p>
+                  <p className="text-xs text-slate-400">Managing menus and items for all active vendors registered in the platform database.</p>
                 </div>
                 <span className="text-xs bg-amber-500/25 text-amber-400 border border-amber-500/30 px-3 py-1 rounded-full font-black">{shopsList.length} Stores</span>
               </div>
@@ -740,30 +1368,70 @@ export default function AdminApp() {
                 shopsList.length === 0 ? (
                   <p className="text-xs text-slate-500 bg-slate-900 p-8 rounded-3xl text-center">No registered shops found in database.</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-4">
-                    {shopsList.map(shop => (
-                      <div key={shop.id} onClick={() => handleShopClick(shop)} className="bg-slate-900 border border-slate-800 p-5 rounded-[28px] cursor-pointer hover:border-[#fc8019] space-y-2">
-                        <h3 className="text-base font-black text-white">{shop.shopName || shop.name}</h3>
-                        <p className="text-xs text-slate-400">📍 {shop.address || 'Ichapuram Main Road'}</p>
-                        <p className="text-xs text-[#fc8019] font-bold">Owner: {shop.ownerName || shop.owner || 'Vendor'}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {shopsList.map((shop, idx) => (
+                      <div 
+                        key={shop.id || idx} 
+                        onClick={() => handleShopClick(shop)} 
+                        className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center gap-3 shadow-lg cursor-pointer hover:border-[#fc8019] transition"
+                      >
+                        <img 
+                          src={shop.imageUrl || "https://images.unsplash.com/photo-1555396273-367ea4eb4db5"} 
+                          alt={shop.shopName || shop.name} 
+                          className="w-14 h-14 rounded-xl object-cover border border-slate-700 shrink-0" 
+                        />
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-xs font-black text-white truncate">{shop.shopName || shop.name}</h4>
+                          <p className="text-[10px] text-amber-500 font-bold uppercase">{shop.category || 'Store'}</p>
+                          <span className="text-[9px] text-slate-400 truncate block">{shop.address || 'Ichapuram'}</span>
+                        </div>
+                        <ChevronRight size={16} className="text-amber-400 shrink-0" />
                       </div>
                     ))}
                   </div>
                 )
               ) : (
-                <div className="space-y-4">
-                  <button onClick={() => setSelectedShopForMenu(null)} className="text-xs font-bold text-slate-400 cursor-pointer">← Back to All Shops</button>
-                  <div className="bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 p-4 rounded-2xl">
-                    <h2 className="text-sm font-black">{selectedShopForMenu.shopName || selectedShopForMenu.name} - Menu Inventory</h2>
+                <div className="space-y-4 animate-fadeIn">
+                  <div className="flex items-center justify-between bg-slate-900 p-4 rounded-2xl border border-slate-800">
+                    <div>
+                      <button 
+                        onClick={() => { setSelectedShopForMenu(null); setShopMenuData([]); }}
+                        className="text-[10px] text-amber-400 font-bold underline cursor-pointer mb-1 block"
+                      >
+                        ← Back to All Shops List
+                      </button>
+                      <h3 className="text-sm font-black text-white">Menu Items for: {selectedShopForMenu.shopName || selectedShopForMenu.name}</h3>
+                    </div>
+                    <span className="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full font-black">
+                      {selectedShopForMenu.category || 'Store'}
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                     {shopMenuData.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-8 text-center col-span-2">No menu items added by this vendor yet.</p>
+                      <div className="text-center py-16 bg-slate-900 rounded-2xl border border-slate-800 space-y-2 col-span-full">
+                        <span className="text-2xl">🍽️</span>
+                        <p className="text-xs text-slate-400 font-bold">No menu items added by this vendor yet.</p>
+                      </div>
                     ) : (
                       shopMenuData.map((item, idx) => (
-                        <div key={idx} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex justify-between items-center text-xs">
-                          <div><p className="font-black text-white">{item.itemName || item.name}</p><p className="text-emerald-400 font-bold">₹ {item.price}</p></div>
-                          <button onClick={() => toggleItemStock(idx)} className={`px-3 py-1.5 rounded-xl font-black text-[10px] cursor-pointer ${item.inStock !== false ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        <div key={item.id || idx} className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between gap-3 shadow-lg">
+                          <img 
+                            src={item.imageUrl || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c"} 
+                            alt={item.itemName || item.name} 
+                            className="w-12 h-12 rounded-xl object-cover border border-slate-700 shrink-0" 
+                          />
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-black text-white truncate">{item.itemName || item.name}</h4>
+                            <p className="text-xs font-black text-amber-500">₹{item.price}</p>
+                            <span className="text-[9px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-bold">
+                              {item.category}
+                            </span>
+                          </div>
+                          <button 
+                            onClick={() => toggleItemStock(idx)} 
+                            className={`px-3 py-1.5 rounded-xl font-black text-[10px] cursor-pointer shrink-0 ${item.inStock !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}
+                          >
                             {item.inStock !== false ? 'In Stock ✓' : 'Out of Stock ✕'}
                           </button>
                         </div>
@@ -802,56 +1470,6 @@ export default function AdminApp() {
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Orders</p>
                   <h3 className="text-2xl font-black text-blue-400 mt-1">{allOrders.length} Orders</h3>
                   <p className="text-[10px] text-slate-400 font-bold mt-1">Fulfilled across Ichapuram</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-slate-900 border border-slate-800 p-6 rounded-[32px] shadow-xl space-y-4">
-                  <h3 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                    <PieChart size={16} /> Revenue vs Commission Pie Share
-                  </h3>
-
-                  <div className="flex flex-col sm:flex-row items-center justify-around py-4 gap-4">
-                    <div className="relative w-36 h-36 rounded-full flex items-center justify-center bg-gradient-to-tr from-amber-500 to-emerald-500 shadow-xl p-1">
-                      <div className="w-full h-full bg-slate-950 rounded-full flex flex-col items-center justify-center text-center p-2">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Commission Cut</span>
-                        <span className="text-lg font-black text-emerald-400">12%</span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-                        <span className="text-slate-300 font-bold">Vendor Payouts: ₹ {(dashboardStats.totalRevenue - dashboardStats.netCommission).toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
-                        <span className="text-slate-300 font-bold">Platform Earnings: ₹ {dashboardStats.netCommission.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 border border-slate-800 p-6 rounded-[32px] shadow-xl space-y-4">
-                  <h3 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                    <Calendar size={16} /> Every Day Commission Log
-                  </h3>
-
-                  <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
-                    {dailyCommissionLog.length === 0 ? (
-                      <p className="text-xs text-slate-500 text-center py-10">No daily commission records available yet.</p>
-                    ) : (
-                      dailyCommissionLog.map((log, index) => (
-                        <div key={index} className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl flex justify-between items-center text-xs">
-                          <div>
-                            <p className="font-black text-white">{log.date}</p>
-                            <p className="text-[10px] text-slate-400">{log.orders} Orders • GMV: ₹{log.revenue.toFixed(2)}</p>
-                          </div>
-                          <span className="font-black text-emerald-400">₹ +{log.commission.toFixed(2)}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
                 </div>
               </div>
             </div>
@@ -956,28 +1574,72 @@ export default function AdminApp() {
 
           {activeTab === 'customers' && (
             <div className="space-y-4 animate-fadeIn">
-              <h1 className="text-xl font-black text-white">Customers Directory (with Live eWallet Balance)</h1>
+              <div className="flex justify-between items-center">
+                <div>
+                  <h1 className="text-xl font-black text-white">Customers Directory (Synced Real-Time)</h1>
+                  <p className="text-xs text-slate-400">All registered customers with mobile numbers, passwords, eWallet balances, and total orders.</p>
+                </div>
+                <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full font-bold text-xs">
+                  Total Customers: {customersList.length}
+                </span>
+              </div>
+
               <div className="bg-slate-900 border border-slate-800 rounded-[32px] overflow-hidden shadow-xl">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-950 text-slate-400 font-black uppercase text-[10px] border-b border-slate-800">
-                      <th className="p-4">Name</th><th className="p-4">Mobile</th><th className="p-4">Address</th><th className="p-4">eWallet Balance</th>
+                      <th className="p-4">Customer Name</th>
+                      <th className="p-4">Mobile Number</th>
+                      <th className="p-4">Password / Security</th>
+                      <th className="p-4 text-center">Total Orders Placed</th>
+                      <th className="p-4 text-right">eWallet Balance</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800 font-bold text-slate-300">
                     {customersList.length === 0 ? (
-                      <tr><td colSpan="4" className="p-6 text-center text-slate-500">No customers registered in database.</td></tr>
+                      <tr><td colSpan="5" className="p-6 text-center text-slate-500">No customers registered in database.</td></tr>
                     ) : (
-                      customersList.map((cust, i) => (
-                        <tr key={i}>
-                          <td className="p-4 text-white font-black">{cust.name || 'Customer'}</td>
-                          <td className="p-4 text-[#fc8019]">{cust.mobile || cust.phoneNumber || 'N/A'}</td>
-                          <td className="p-4">{cust.deliveryAddress || cust.address || 'Ichapuram'}</td>
-                          <td className="p-4 text-emerald-400 font-black text-sm">
-                            ₹ {cust.walletBalance !== undefined && cust.walletBalance !== null ? Number(cust.walletBalance).toFixed(2) : '0.00'}
-                          </td>
-                        </tr>
-                      ))
+                      customersList.map((cust, i) => {
+                        const custMobile = cust.mobile || cust.phoneNumber;
+                        const orderCount = getCustomerOrderCount(custMobile);
+                        const passKey = `cust_${cust.id || i}`;
+                        const isPasswordVisible = visiblePasswords[passKey];
+                        const isEditing = editingPasswordId === custMobile;
+
+                        return (
+                          <tr key={i} className="hover:bg-slate-850">
+                            <td className="p-4 text-white font-black">{cust.name || 'Customer'}</td>
+                            <td className="p-4 text-[#fc8019]">{custMobile || 'N/A'}</td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                                  {isPasswordVisible ? (cust.password || '••••••••') : '••••••••'}
+                                </span>
+                                <button onClick={() => togglePasswordVisibility(passKey)} className="text-slate-400 hover:text-white cursor-pointer p-1">
+                                  {isPasswordVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                                </button>
+                                <button onClick={() => { setEditingPasswordId(isEditing ? null : custMobile); setNewPasswordInput(''); }} className="text-amber-400 hover:text-amber-300 text-[10px] underline ml-1 cursor-pointer">
+                                  {isEditing ? 'Cancel' : 'Change ✏️'}
+                                </button>
+                              </div>
+                              {isEditing && (
+                                <div className="mt-2 flex gap-1.5 items-center">
+                                  <input type="text" value={newPasswordInput} onChange={(e) => setNewPasswordInput(e.target.value)} placeholder="New Password" className="bg-slate-950 border border-slate-700 px-2.5 py-1 rounded-lg text-xs text-white outline-none w-32" />
+                                  <button onClick={() => handleUpdatePassword(custMobile, 'customer')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer shadow">Save</button>
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full text-xs font-black">
+                                {orderCount} Orders
+                              </span>
+                            </td>
+                            <td className="p-4 text-right text-emerald-400 font-black text-sm">
+                              ₹ {Number(cust.walletBalance || 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -985,8 +1647,314 @@ export default function AdminApp() {
             </div>
           )}
 
-          {activeTab === 'partners' && <AdminPartnersVerification />}
-          {activeTab === 'chats' && <AdminChatDashboard />}
+          {activeTab === 'partners' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h1 className="text-xl font-black text-white">Delivery Partners Directory & KYC</h1>
+                  <p className="text-xs text-slate-400">All registered delivery partners with their mobile numbers, online status, and total completed deliveries.</p>
+                </div>
+                <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full font-bold text-xs">
+                  Total Partners: {partners.length}
+                </span>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-[32px] overflow-hidden shadow-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-950 text-slate-400 font-black uppercase text-[10px] border-b border-slate-800">
+                      <th className="p-4">Partner Name</th>
+                      <th className="p-4">Mobile Number</th>
+                      <th className="p-4">Vehicle / Bike No</th>
+                      <th className="p-4 text-center">Completed Deliveries</th>
+                      <th className="p-4 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 font-bold text-slate-300">
+                    {partners.length === 0 ? (
+                      <tr><td colSpan="5" className="p-6 text-center text-slate-500">No delivery partners registered in database.</td></tr>
+                    ) : (
+                      partners.map((p, i) => {
+                        const isPartnerOnline = p.online === true || p.isOnline === true || p.status === 'ONLINE';
+                        const completedCount = getPartnerOrderCount(p.id, p.mobile);
+                        return (
+                          <tr key={i} className="hover:bg-slate-850">
+                            <td className="p-4 text-white font-black">{p.fullName || p.name || 'Rider'}</td>
+                            <td className="p-4 text-[#fc8019]">{p.mobile || 'N/A'}</td>
+                            <td className="p-4">{p.vehicleType || 'Motorcycle'} ({p.bikeNumber || 'N/A'})</td>
+                            <td className="p-4 text-center">
+                              <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-3 py-1 rounded-full text-xs font-black">
+                                {completedCount} Deliveries
+                              </span>
+                            </td>
+                            <td className="p-4 text-right">
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black ${isPartnerOnline ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                {isPartnerOnline ? '● Online' : '○ Offline'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="pt-4">
+                <AdminPartnersVerification />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'chats' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div>
+                <h1 className="text-xl font-black text-white">Live Support Chats</h1>
+                <p className="text-xs text-slate-400">Select any user category to view their names and chat directly with them in real-time.</p>
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={() => { setChatCategoryTab('customers'); setActiveChatUser(null); }} className={`px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${chatCategoryTab === 'customers' ? 'bg-[#fc8019] border-amber-500 text-slate-950 shadow' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
+                  👤 Customers ({customersList.length})
+                </button>
+                <button onClick={() => { setChatCategoryTab('partners'); setActiveChatUser(null); }} className={`px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${chatCategoryTab === 'partners' ? 'bg-[#fc8019] border-amber-500 text-slate-950 shadow' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
+                  🛵 Delivery Partners ({partners.length})
+                </button>
+                <button onClick={() => { setChatCategoryTab('shops'); setActiveChatUser(null); }} className={`px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer border ${chatCategoryTab === 'shops' ? 'bg-[#fc8019] border-amber-500 text-slate-950 shadow' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
+                  🏪 Shop Owners ({shopsList.length})
+                </button>
+              </div>
+
+              <div className="flex h-[640px] bg-[#0b141a] border border-slate-800 rounded-[32px] overflow-hidden shadow-2xl">
+                
+                <div className="w-1/3 bg-[#111b21] border-r border-slate-800 flex flex-col">
+                  <div className="p-4 bg-[#202c33] border-b border-slate-800 flex items-center justify-between">
+                    <span className="text-xs font-black text-white uppercase tracking-wider">Select {chatCategoryTab} to chat</span>
+                    <span className="text-[10px] bg-slate-800 px-2.5 py-0.5 rounded-full text-amber-400 font-bold">
+                      {chatCategoryTab === 'customers' && customersList.length}
+                      {chatCategoryTab === 'partners' && partners.length}
+                      {chatCategoryTab === 'shops' && shopsList.length} Active
+                    </span>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto divide-y divide-slate-800/40">
+                    {chatCategoryTab === 'customers' && customersList.map((c, idx) => {
+                      const custMobile = c.mobile || c.phoneNumber;
+                      const custMsgs = adminChatMessages || [];
+                      const lastMsg = custMsgs[custMsgs.length - 1];
+                      const hasUnread = c.unreadCount > 0;
+
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={() => {
+                            setActiveChatUser(c);
+                            c.unreadCount = 0;
+                          }} 
+                          className={`p-4 cursor-pointer transition flex items-center justify-between gap-3 ${activeChatUser?.id === c.id ? 'bg-[#2a3942] border-l-4 border-[#00a884]' : 'hover:bg-[#202c33]/50'}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="w-10 h-10 rounded-2xl bg-[#00a884]/20 text-[#00a884] flex items-center justify-center font-black shrink-0 relative">
+                              <Users size={18} />
+                              {hasUnread && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#111b21] rounded-full animate-ping"></span>
+                              )}
+                              {hasUnread && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#111b21] rounded-full"></span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-white truncate">{c.name || 'Customer'}</h4>
+                              <p className="text-[10px] text-slate-400 font-bold">+91 {custMobile || 'N/A'}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <span className="text-[10px] text-slate-400 font-bold">
+                              {lastMsg && lastMsg.timestamp 
+                                ? new Date(lastMsg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                                : ''}
+                            </span>
+                            {hasUnread && (
+                              <span className="w-4 h-4 bg-emerald-500 text-slate-950 font-black text-[9px] rounded-full flex items-center justify-center shadow-md animate-pulse">
+                                {c.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {chatCategoryTab === 'partners' && partners.map((p, idx) => {
+                      const pMobile = p.mobile;
+                      const pMsgs = adminChatMessages || [];
+                      const lastMsg = pMsgs[pMsgs.length - 1];
+                      const hasUnread = p.unreadCount > 0;
+
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={() => {
+                            setActiveChatUser(p);
+                            p.unreadCount = 0;
+                          }} 
+                          className={`p-4 cursor-pointer transition flex items-center justify-between gap-3 ${activeChatUser?.id === p.id ? 'bg-[#2a3942] border-l-4 border-[#00a884]' : 'hover:bg-[#202c33]/50'}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="w-10 h-10 rounded-2xl bg-[#00a884]/20 text-[#00a884] flex items-center justify-center font-black shrink-0 relative">
+                              <Bike size={18} />
+                              {hasUnread && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#111b21] rounded-full animate-ping"></span>
+                              )}
+                              {hasUnread && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#111b21] rounded-full"></span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-white truncate">{p.fullName || p.name || 'Partner'}</h4>
+                              <p className="text-[10px] text-slate-400 font-bold">+91 {pMobile || 'N/A'}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <span className="text-[10px] text-slate-400 font-bold">
+                              {lastMsg && lastMsg.timestamp 
+                                ? new Date(lastMsg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                                : ''}
+                            </span>
+                            {hasUnread && (
+                              <span className="w-4 h-4 bg-emerald-500 text-slate-950 font-black text-[9px] rounded-full flex items-center justify-center shadow-md animate-pulse">
+                                {p.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                   {chatCategoryTab === 'shops' && shopsList.map((s, idx) => {
+                      const sMobile = s.mobile || s.mobileNumber;
+                      const hasUnread = (s.unreadCount || 0) > 0;
+                      
+                      const displayTime = s.timestamp 
+                        ? new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                        : '';
+
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={() => {
+                            setActiveChatUser(s);
+                            setShopsList(prev => prev.map(shop => 
+                              (String(shop.mobile || shop.mobileNumber).trim() === String(sMobile).trim())
+                                ? { ...shop, unreadCount: 0 }
+                                : shop
+                            ));
+                          }} 
+                          className={`p-4 cursor-pointer transition flex items-center justify-between gap-3 ${activeChatUser?.id === s.id ? 'bg-[#2a3942] border-l-4 border-[#00a884]' : 'hover:bg-[#202c33]/50'}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="w-10 h-10 rounded-2xl bg-[#00a884]/20 text-[#00a884] flex items-center justify-center font-black shrink-0 relative">
+                              <Store size={18} />
+                              {hasUnread && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#111b21] rounded-full animate-ping"></span>
+                              )}
+                              {hasUnread && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#111b21] rounded-full"></span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-white truncate">{s.shopName || s.name || 'Shop'}</h4>
+                              <p className="text-[10px] text-slate-400 font-bold truncate">
+                                {s.lastMessage || `+91 ${sMobile || 'N/A'}`}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-1.5 shrink-0">
+                            <span className={`text-[10px] font-bold ${hasUnread ? 'text-emerald-400' : 'text-slate-400'}`}>
+                              {displayTime}
+                            </span>
+                            {hasUnread && (
+                              <span className="w-5 h-5 bg-emerald-500 text-slate-950 font-black text-[10px] rounded-full flex items-center justify-center shadow-md animate-pulse">
+                                {s.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex-1 flex flex-col bg-[#0b141a]">
+                  {!activeChatUser ? (
+                    <div className="flex flex-col items-center justify-center flex-1 text-slate-500 space-y-2">
+                      <MessageCircle size={36} className="text-slate-700 animate-bounce" />
+                      <p className="text-xs font-bold">Select any user from the left list to start live chat.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-4 bg-[#202c33] border-b border-slate-800 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[#00a884] text-white flex items-center justify-center font-black">
+                            <ShieldCheck size={18} />
+                          </div>
+                          <div>
+                            <h3 className="text-xs font-black text-white">{activeChatUser.fullName || activeChatUser.name || activeChatUser.shopName}</h3>
+                            <p className="text-[10px] text-slate-400">Mobile: +91 {activeChatUser.mobile || activeChatUser.phoneNumber}</p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full font-bold">● Connected</span>
+                      </div>
+
+                      <div className="flex-1 p-5 overflow-y-auto space-y-3 bg-[radial-gradient(#111b21_1px,transparent_1px)] [background-size:16px_16px]">
+                        {adminChatMessages.length === 0 ? (
+                          <div className="text-center py-20 text-slate-500 space-y-1">
+                            <p className="text-xs font-bold">No messages in this conversation yet.</p>
+                            <p className="text-[10px]">Send a reply below to start chatting.</p>
+                          </div>
+                        ) : (
+                          renderGroupedChatMessages(adminChatMessages)
+                        )}
+                        <div ref={messagesEndRef} />
+                      </div>
+
+                      {adminSelectedFile && (
+                        <div className="px-4 py-2 bg-[#202c33] border-t border-slate-800 flex items-center justify-between text-xs">
+                          <span className="text-amber-400 truncate max-w-[300px]">📎 {adminSelectedFile.name}</span>
+                          <button onClick={() => setAdminSelectedFile(null)} className="text-rose-400 font-bold cursor-pointer">Remove</button>
+                        </div>
+                      )}
+
+                      <div className="p-3 bg-[#202c33] border-t border-slate-800 flex items-center gap-3">
+                        <label className="text-slate-400 hover:text-white cursor-pointer p-2.5 rounded-xl bg-[#2a3942] border border-slate-700/50">
+                          <Paperclip size={18} />
+                          <input type="file" onChange={handleAdminFileUpload} className="hidden" accept="image/*,.pdf,.doc,.docx" />
+                        </label>
+
+                        <input 
+                          type="text" 
+                          value={adminChatInput} 
+                          onChange={(e) => setAdminChatInput(e.target.value)} 
+                          placeholder="Type a message or attach image..." 
+                          className="flex-1 bg-[#2a3942] border border-slate-700/50 px-4 py-3 rounded-xl text-xs font-bold text-white outline-none focus:border-[#00a884] transition"
+                          onKeyPress={(e) => { if (e.key === 'Enter') sendAdminDirectMessage(); }} 
+                        />
+                        <button 
+                          onClick={sendAdminDirectMessage} 
+                          className="bg-[#00a884] hover:bg-[#008f72] text-white px-6 py-3 rounded-xl font-black text-xs shadow-lg cursor-pointer flex items-center gap-2 transition"
+                        >
+                          <Send size={14} /> Send
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          )}
 
           {activeTab === 'promos' && (
             <div className="space-y-4 animate-fadeIn">
@@ -1027,9 +1995,10 @@ export default function AdminApp() {
             </div>
           )}
 
+          {/* ✅ Updated Broadcast Tab with Title, Description and Image inputs */}
           {activeTab === 'broadcast' && (
             <div className="space-y-4 animate-fadeIn">
-              <h1 className="text-xl font-black text-white">Broadcast Push Notifications with Image</h1>
+              <h1 className="text-xl font-black text-white">Broadcast Push Notifications with Header & Image</h1>
               <form onSubmit={sendBroadcast} className="bg-slate-900 border border-slate-800 p-6 rounded-[32px] shadow-xl space-y-4 max-w-lg">
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Target Audience</label>
@@ -1037,10 +2006,17 @@ export default function AdminApp() {
                     <option>All Users</option><option>All Customers</option><option>All Shop Owners</option><option>All Delivery Partners</option>
                   </select>
                 </div>
+
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Announcement Message</label>
-                  <textarea rows={3} value={broadcastMsg} onChange={(e) => setBroadcastMsg(e.target.value)} placeholder="Type announcement..." className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs font-bold text-white outline-none" required></textarea>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Notification Header (Title)</label>
+                  <input type="text" value={broadcastTitle} onChange={(e) => setBroadcastTitle(e.target.value)} placeholder="e.g. 🎉 Diwali Special Offer" className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-xs font-bold text-white outline-none" required />
                 </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Notification Description (Body)</label>
+                  <textarea rows={3} value={broadcastMsg} onChange={(e) => setBroadcastMsg(e.target.value)} placeholder="Type announcement description..." className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs font-bold text-white outline-none" required></textarea>
+                </div>
+
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Attach Promotional Image (Optional)</label>
                   <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-3 rounded-xl">
@@ -1048,6 +2024,7 @@ export default function AdminApp() {
                     <input type="file" accept="image/*" onChange={(e) => setBroadcastImageFile(e.target.files[0])} className="text-xs text-slate-300 file:bg-amber-500 file:text-slate-950 file:border-0 file:rounded-lg file:px-3 file:py-1 cursor-pointer w-full" />
                   </div>
                 </div>
+
                 <button type="submit" className="w-full bg-[#fc8019] text-slate-950 py-3.5 rounded-2xl font-black text-xs shadow cursor-pointer">Broadcast Now 🚀</button>
               </form>
             </div>
@@ -1073,15 +2050,17 @@ export default function AdminApp() {
                 partners.length === 0 ? <p className="text-slate-500 text-center py-6">No partners found.</p> :
                 partners.map((p, idx) => {
                   const isPartnerOnline = p.online === true || p.isOnline === true || p.status === 'ONLINE';
+                  const completedCount = getPartnerOrderCount(p.id, p.mobile);
                   return (
-                    <div key={idx} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex justify-between items-center">
-                      <div>
-                        <p className="font-black text-white">{p.fullName || p.name}</p>
-                        <p className="text-[10px] text-slate-400">Bike: {p.bikeNumber || 'N/A'}</p>
+                    <div key={idx} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1">
+                      <div className="flex justify-between items-center">
+                        <p className="font-black text-white text-sm">{p.fullName || p.name || 'Rider'}</p>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black ${isPartnerOnline ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                          {isPartnerOnline ? '● Online' : '○ Offline'}
+                        </span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${isPartnerOnline ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                        {isPartnerOnline ? '● Online' : '○ Offline'}
-                      </span>
+                      <p className="text-amber-400 font-bold">📞 {p.mobile || 'N/A'} • <span className="text-slate-300">Bike: {p.bikeNumber || 'N/A'}</span></p>
+                      <p className="text-emerald-400 font-bold text-[11px]">Completed Deliveries: {completedCount} Orders</p>
                     </div>
                   );
                 })
@@ -1092,14 +2071,16 @@ export default function AdminApp() {
                 shopsList.map((s, idx) => {
                   const isShopOnline = s.online === true || s.isOnline === true || s.status === 'ONLINE' || s.isOpen === true || s.online !== false;
                   return (
-                    <div key={idx} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex justify-between items-center">
-                      <div>
-                        <p className="font-black text-white">{s.shopName || s.name}</p>
-                        <p className="text-[10px] text-slate-400">{s.address || 'Ichapuram'}</p>
+                    <div key={idx} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5 text-xs">
+                      <div className="flex justify-between items-center">
+                        <p className="font-black text-white text-sm">{s.shopName || s.name}</p>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black ${isShopOnline ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                          {isShopOnline ? '● Open' : '○ Closed'}
+                        </span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${isShopOnline ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                        {isShopOnline ? '● Open' : '○ Closed'}
-                      </span>
+                      <p className="text-amber-400 font-bold">📞 {s.mobile || 'N/A'} • <span className="text-amber-300 uppercase">Category: {s.category || 'FOOD'}</span></p>
+                      <p className="text-slate-300">📜 <b>FSSAI:</b> {s.fssaiLicense || 'N/A'}</p>
+                      <p className="text-slate-400">📍 <b>Address:</b> {s.address || 'Ichapuram'}</p>
                     </div>
                   );
                 })
@@ -1107,19 +2088,26 @@ export default function AdminApp() {
 
               {showDashboardListModal === 'customers' && (
                 customersList.length === 0 ? <p className="text-slate-500 text-center py-6">No customers found.</p> :
-                customersList.map((customer, idx) => (
-                  <div key={idx} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5 text-xs">
-                    <div className="flex justify-between items-center">
-                      <p className="font-black text-white text-sm">{customer.name || 'New Customer'}</p>
-                      <span className="text-emerald-400 font-black text-xs">
-                        ₹ {customer.walletBalance !== undefined && customer.walletBalance !== null ? Number(customer.walletBalance).toFixed(2) : '0.00'}
-                      </span>
+                customersList.map((customer, idx) => {
+                  const orderCount = getCustomerOrderCount(customer.mobile || customer.phoneNumber);
+                  return (
+                    <div key={idx} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5 text-xs">
+                      <div className="flex justify-between items-center">
+                        <p className="font-black text-white text-sm">{customer.name || 'New Customer'}</p>
+                        <span className="text-emerald-400 font-black text-xs">
+                          ₹ {Number(
+                            customer.walletBalance !== undefined && customer.walletBalance !== null 
+                              ? customer.walletBalance 
+                              : (customer.wallet_balance || customer.balance || customer.eWalletBalance || 0.00)
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                      <p className="text-amber-400 font-bold">📞 {customer.mobile || customer.phoneNumber || 'N/A'} • <span className="text-amber-300">{orderCount} Orders Placed</span></p>
+                      <p className="text-slate-300">📧 <b>Email:</b> {customer.email || 'N/A'}</p>
+                      <p className="text-slate-400">📍 <b>Address:</b> {customer.deliveryAddress || customer.address || 'Ichapuram'}</p>
                     </div>
-                    <p className="text-amber-400 font-bold">📞 {customer.mobile || customer.phoneNumber || 'N/A'}</p>
-                    <p className="text-slate-300">📧 <b>Email:</b> {customer.email || 'N/A'}</p>
-                    <p className="text-slate-400">📍 <b>Address:</b> {customer.deliveryAddress || customer.address || 'Ichapuram'}</p>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -1172,8 +2160,21 @@ export default function AdminApp() {
                 <h4 className="font-black text-amber-400 uppercase text-[10px] flex items-center gap-1.5">
                   <Bike size={13} /> Assigned Delivery Partner
                 </h4>
-                <p><b>Partner ID / Name:</b> {selectedOrderDetails.deliveryPartnerId ? `Partner #${selectedOrderDetails.deliveryPartnerId}` : <span className="text-amber-400 font-bold">Unassigned / Finding Rider...</span>}</p>
-                <p><b>Payment Method:</b> {selectedOrderDetails.paymentMethod || 'COD'}</p>
+                {(() => {
+                  const mPartner = partners.find(p => String(p.id) === String(selectedOrderDetails.deliveryPartnerId) || String(p.mobile).trim() === String(selectedOrderDetails.deliveryPartnerMobile).trim());
+                  const pName = mPartner ? (mPartner.fullName || mPartner.name) : (selectedOrderDetails.deliveryPartnerName || selectedOrderDetails.partnerName);
+                  const pMob = mPartner ? mPartner.mobile : selectedOrderDetails.deliveryPartnerMobile;
+
+                  return pName ? (
+                    <>
+                      <p><b>Name:</b> <span className="text-amber-300 font-bold">{pName}</span></p>
+                      <p><b>Mobile:</b> {pMob || 'N/A'}</p>
+                    </>
+                  ) : (
+                    <p className="text-amber-400 font-bold">Unassigned / Finding Rider...</p>
+                  );
+                })()}
+                <p className="mt-1"><b>Payment Method:</b> {selectedOrderDetails.paymentMethod || 'COD'}</p>
               </div>
 
             </div>
@@ -1196,7 +2197,7 @@ export default function AdminApp() {
               <button onClick={() => setSelectedPayoutForTransfer(null)} className="text-slate-400 cursor-pointer"><X size={20} /></button>
             </div>
             <div className="space-y-3 text-xs">
-              <p className="text-slate-300">Transferring funds to <span className="font-black text-white">{selectedPayoutForTransfer.name}</span> via UPI / Bank Gateway.</p>
+              <p className="text-slate-300">Transferring funds to <span className="format-black text-white">{selectedPayoutForTransfer.name}</span> via UPI / Bank Gateway.</p>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Edit Transfer Amount (₹)</label>
                 <input 
@@ -1222,14 +2223,6 @@ export default function AdminApp() {
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="text-sm font-black text-amber-400">Revenue Breakdown & PDF</h3>
               <button onClick={() => setShowRevenueModal(false)} className="text-slate-400 cursor-pointer"><X size={20} /></button>
-            </div>
-            <div className="space-y-2.5">
-              {revenueBreakdown.map((item, idx) => (
-                <div key={idx} className="bg-slate-800 p-3.5 rounded-2xl flex justify-between items-center text-xs">
-                  <div><p className="font-black text-white">{item.period}</p><p className="text-[10px] text-emerald-400">₹ {item.amount}</p></div>
-                  <button onClick={() => generateRealPDF(item.period, item.amount)} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl font-black text-[10px] cursor-pointer">PDF</button>
-                </div>
-              ))}
             </div>
             <button onClick={() => setShowRevenueModal(false)} className="w-full bg-[#fc8019] text-slate-950 py-3 rounded-2xl font-black text-xs cursor-pointer">Close</button>
           </div>

@@ -8,10 +8,18 @@ import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet
 import 'leaflet/dist/leaflet.css';
 import CustomerSupportChat from './components/CustomerSupportChat';
 import OrderChatModal from './components/OrderChatModal'; 
-import logo from './assets/logo.png'; 
+import { LocalNotifications } from '@capacitor/local-notifications';
+import logo from './assets/logo.png';
+import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
+
+
+
 
 // ✅ BASE URL UPDATE (AWS)
-const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "https://api.foodiee.shop";
+
+
 
 // --- CUSTOM ANIMATED BIKE ICON FOR LEAFLET MAP ---
 const getAnimatedBikeIcon = (rotationAngle) => {
@@ -39,16 +47,21 @@ function MapUpdater({ center }) {
   return null;
 }
 
-// --- SHOP BANNER AUTO-SLIDER COMPONENT ---
 function ShopBannerSlider({ selectedShop }) {
+  const [imageError, setImageError] = React.useState(false);
+
   const allShopImages = [
-    selectedShop.imageUrl || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5',
-    ...(selectedShop.additionalImages || [])
-  ];
+    selectedShop.imageUrl 
+      ? (selectedShop.imageUrl.startsWith('http') ? selectedShop.imageUrl : `${API_BASE_URL}/${selectedShop.imageUrl.startsWith('/') ? selectedShop.imageUrl.slice(1) : selectedShop.imageUrl}`) 
+      : '',
+    ...(selectedShop.additionalImages || []).map(img => 
+      img.startsWith('http') ? img : `${API_BASE_URL}/${img.startsWith('/') ? img.slice(1) : img}`
+    )
+  ].filter(Boolean);
 
-  const [currentSlide, setCurrentSlide] = useState(0);
+  const [currentSlide, setCurrentSlide] = React.useState(0);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (allShopImages.length <= 1) return;
     const timer = setInterval(() => {
       setCurrentSlide(prev => (prev + 1) % allShopImages.length);
@@ -58,24 +71,42 @@ function ShopBannerSlider({ selectedShop }) {
 
   return (
     <div className="w-full h-48 rounded-3xl overflow-hidden relative border border-slate-700 shadow-xl bg-slate-950 group">
-      {allShopImages.map((img, idx) => (
-        <div 
-          key={idx} 
-          className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${idx === currentSlide ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
-        >
-          <img src={img} alt={`Slide ${idx}`} className="w-full h-full object-cover" />
+      {allShopImages.length === 0 || imageError ? (
+        // 👇 Image lenappudu or error vasthe ee stylish banner kanipistundi
+        <div className="absolute inset-0 bg-gradient-to-tr from-amber-600 via-orange-600 to-yellow-500 flex flex-col items-center justify-center p-4 text-center z-10">
+          <span className="text-4xl mb-1 drop-shadow-md">🏪</span>
+          <h2 className="text-xl font-black text-white tracking-widest drop-shadow-lg uppercase">
+            {selectedShop.name}
+          </h2>
+          <p className="text-[10px] text-slate-100 font-bold mt-1 bg-black/30 px-3 py-1 rounded-full backdrop-blur-xs">
+            {selectedShop.address || 'Ichapuram Main Road'}
+          </p>
         </div>
-      ))}
+      ) : (
+        allShopImages.map((img, idx) => (
+          <div 
+            key={idx} 
+            className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${idx === currentSlide ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
+          >
+            <img 
+              src={img} 
+              alt={`Slide ${idx}`} 
+              onError={() => setImageError(true)} 
+              className="w-full h-full object-cover" 
+            />
+          </div>
+        ))
+      )}
 
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent z-20"></div>
 
       <div className="absolute bottom-3 left-4 right-4 z-30 flex justify-between items-end">
         <div>
           <h3 className="text-base font-black text-white drop-shadow-md">{selectedShop.name}</h3>
-          <p className="text-[11px] text-slate-300 font-medium">{selectedShop.address} • {selectedShop.rating}</p>
+          <p className="text-[11px] text-slate-300 font-medium">{selectedShop.address}</p>
         </div>
 
-        {allShopImages.length > 1 && (
+        {allShopImages.length > 1 && !imageError && (
           <div className="flex gap-1.5 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
             {allShopImages.map((_, i) => (
               <span 
@@ -90,77 +121,271 @@ function ShopBannerSlider({ selectedShop }) {
   );
 }
 
+const calculateDeliveryTime = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distanceKm = R * c; // Distance in km
+  
+  // సగటున 1 కిమీకి 3 నిమిషాలు పడుతుంది అనుకుంటే
+  const estimatedMins = Math.max(10, Math.round(distanceKm * 3));
+  return `${estimatedMins} Mins`;
+};
 export default function CustomerApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem('userMobile') ? true : false;
+    const savedMobile = localStorage.getItem('userMobile');
+    const isInstalledBefore = localStorage.getItem('foodiee_app_installed');
+    
+    // Oka vela app uninstall chesi malli vesthe, local storage reset avvali
+    if (!isInstalledBefore) {
+      localStorage.clear();
+      localStorage.setItem('foodiee_app_installed', 'true');
+      return false;
+    }
+    
+    return savedMobile ? true : false;
   });
-  const [isRegisterView, setIsRegisterView] = useState(false);
-  
-  // --- OTP LOGIN STATES ---
-  const [step, setStep] = useState(1);
-  const [generatedOtpHint, setGeneratedOtpHint] = useState('');
+
+  const [authMode, setAuthMode] = useState('login');
+  const [enteredPin, setEnteredPin] = useState('');
   const [showNotificationModal, setShowNotificationModal] = useState(false);
 
-  // --- UNREAD CHAT COUNT & BLINKING DOT STATES ---
   const [unreadSupportCount, setUnreadSupportCount] = useState(0); 
-  const [unreadOrderCount, setUnreadOrderCount] = useState(0); 
+  const [unreadOrderCount, setUnreadOrderCount] = useState(0);
+  const [useWalletBalance, setUseWalletBalance] = useState(false); 
 
-  // Form States
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [otpInput, setOtpInput] = useState('');
+  const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
 
+  // ✅ Native Push Notifications Registration
+  // ✅ Native Push Notifications Registration (Safe for Web & Mobile)
+  useEffect(() => {
+    const userMob = phone || localStorage.getItem('userMobile');
+    if (!userMob) return;
+
+    const registerNativePush = async () => {
+  try {
+    // 🌟 వెబ్ బ్రౌజర్ అయితే వెంటనే బయటికి వచ్చేయడానికి
+    if (typeof Capacitor === 'undefined' || !Capacitor.isNativePlatform()) {
+      console.log("Running on Web Browser. PushNotifications plugin skipped.");
+      return;
+    }
+
+    let permResult = await PushNotifications.checkPermissions();
+    if (permResult.receive === 'prompt') {
+      permResult = await PushNotifications.requestPermissions();
+    }
+    
+    if (permResult.receive === 'granted') {
+      await PushNotifications.register();
+      
+      PushNotifications.addListener('registration', async (token) => {
+        console.log('Native Push Registration Token:', token.value);
+        if (userMob && token.value) {
+          await fetch(`${API_BASE_URL}/api/customers/update-fcm-token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mobile: userMob, fcmToken: token.value })
+          });
+          console.log("FCM Token successfully synced to database!");
+        }
+      });
+    }
+  } catch (error) {
+    console.log("Push notifications not supported in this environment:", error);
+  }
+};
+
+    registerNativePush();
+  }, [phone, isLoggedIn]);
   const [activeTab, setActiveTab] = useState('home');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedShop, setSelectedShop] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [cart, setCart] = useState([]);
 
-  // --- QUICK ACTION & FOOD TYPE FILTER STATES ---
   const [quickFilter, setQuickFilter] = useState('All');
   const [foodTypeFilter, setFoodTypeFilter] = useState('All');
 
-  // --- EDIT PROFILE MODAL STATES ---
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [editProfileName, setEditProfileName] = useState('');
 
-  // --- WALLET HISTORY & SCRATCH CARD MODAL STATES ---
   const [isWalletHistoryOpen, setIsWalletHistoryOpen] = useState(false);
+  
+  // ✅ User-specific scratch cards storage
   const [scratchCards, setScratchCards] = useState(() => {
-    const saved = localStorage.getItem('foodiee_saved_scratch_cards');
+    const userMob = localStorage.getItem('userMobile');
+    const saved = localStorage.getItem(`foodiee_saved_scratch_cards_${userMob}`);
     return saved !== null ? JSON.parse(saved) : [];
   });
+  
   const [activeScratchCard, setActiveScratchCard] = useState(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [scratchProgress, setScratchProgress] = useState(0);
   const canvasRef = useRef(null);
 
-  // --- ORDER CHAT STATES ---
   const [activeChatRecipient, setActiveChatRecipient] = useState(null); 
 
-  // --- BACKEND DYNAMIC FOOD, SHOPS & ORDERS STATE WITH AUTO POLLING ---
   const [backendFoodItems, setBackendFoodItems] = useState([]);
   const [allShops, setAllShops] = useState([]);
   const [backendOrders, setBackendOrders] = useState([]);
   const [userPhoto, setUserPhoto] = useState('https://api.dicebear.com/7.x/avataaars/svg?seed=Naveen');
 
-  // --- DYNAMIC PROMO CODES & POP-UP STATES ---
+  const [activeTrackingOrder, setActiveTrackingOrder] = useState(null);
+  const [riderLocation, setRiderLocation] = useState({ lat: 18.5793, lng: 84.4452 });
+  const [deliveryBoyCoords, setDeliveryBoyCoords] = useState({ lat: 18.5793, lng: 84.4452 });
+
   const [availablePromos, setAvailablePromos] = useState([
-    { code: 'FIRST50', discount: '₹50 OFF', minOrder: 199, isActive: true }
+    { code: 'FIRST20', discount: '₹20 OFF', minOrder: 199, isActive: true }
   ]);
   const [promoPopup, setPromoPopup] = useState(null);
+  
 
-  // --- NOTIFICATIONS STATE ---
   const [notifications, setNotifications] = useState([
     { id: 1, title: '⚡ Flash Offer Added!', desc: 'Use code FIRST50 for ₹50 OFF on your first food order.', time: 'Just now', unread: true },
     { id: 2, title: '🛒 Free Delivery', desc: 'Free delivery on all grocery orders above ₹199 in Ichapuram.', time: '2 hrs ago', unread: true }
   ]);
 
+  // ✅ Native Notification Helper Function
+  const showNativeNotification = (title, bodyText) => {
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(title || "Foodiee Notification", {
+        body: bodyText || "You have a new update!",
+        icon: logo
+      });
+    }
+  };
+
+  // ✅ User-specific local storage synchronization hooks
   useEffect(() => {
-    localStorage.setItem('foodiee_saved_scratch_cards', JSON.stringify(scratchCards));
+    const userMob = localStorage.getItem('userMobile');
+    if (userMob) {
+      localStorage.setItem(`foodiee_saved_scratch_cards_${userMob}`, JSON.stringify(scratchCards));
+    }
   }, [scratchCards]);
+  // ✅ మొబైల్ నంబర్ ఆధారంగా డేటాబేస్ నుండి వాలెట్ మరియు ట్రాన్సాక్షన్ సింక్ చేయడం
+  const fetchWalletFromDatabase = async () => {
+    const userMob = phone || localStorage.getItem('userMobile');
+    if (!userMob) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/wallet/${userMob}`);
+      if (response.ok) {
+        const data = await response.json();
+        setWalletBalance(data.walletBalance || 0.0);
+        
+        if (data.transactions && Array.isArray(data.transactions)) {
+          const formattedTxns = data.transactions.map((t, idx) => ({
+            id: "TXN_" + (idx + 100),
+            type: t.includes('Added') || t.includes('Credit') ? 'CREDIT' : 'DEBIT',
+            method: t,
+            amount: 0,
+            date: new Date().toLocaleString(),
+            status: 'Success'
+          }));
+          setPaymentHistory(formattedTxns);
+        }
+        localStorage.setItem(`foodiee_wallet_balance_${userMob}`, data.walletBalance);
+      }
+    } catch (err) {
+      console.error("Failed to fetch wallet data from database", err);
+    }
+  };
 
   useEffect(() => {
+    fetchWalletFromDatabase();
+  }, [phone, isLoggedIn]);
+
+  const [walletBalance, setWalletBalance] = useState(() => {
+    const userMob = localStorage.getItem('userMobile');
+    const saved = localStorage.getItem(`foodiee_wallet_balance_${userMob}`);
+    return saved !== null ? parseFloat(saved) : 0.00;
+  });
+
+  useEffect(() => {
+    const userMob = localStorage.getItem('userMobile');
+    if (userMob) {
+      localStorage.setItem(`foodiee_wallet_balance_${userMob}`, walletBalance);
+    }
+  }, [walletBalance]);
+
+ const [paymentHistory, setPaymentHistory] = useState(() => {
+    const userMob = localStorage.getItem('userMobile');
+    const saved = localStorage.getItem(`foodiee_payment_history_${userMob}`);
+    return saved !== null ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    const userMob = localStorage.getItem('userMobile');
+    if (userMob) {
+      localStorage.setItem(`foodiee_payment_history_${userMob}`, JSON.stringify(paymentHistory));
+    }
+  }, [paymentHistory]);
+
+  useEffect(() => {
+    const requestCapacitorNotifications = async () => {
+      try {
+        const permStatus = await LocalNotifications.requestPermissions();
+        if (permStatus.display === 'granted') {
+          console.log('Capacitor Notification permission granted!');
+        }
+      } catch (e) {
+        console.log('Not running in Capacitor native environment or error:', e);
+      }
+    };
+    requestCapacitorNotifications();
+  }, []);
+
+  // Request device permissions (Location & Camera)
+ useEffect(() => {
+    const requestDevicePermissions = async () => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            
+            // 🌟 లైవ్ జీపీఎస్ కోఆర్డినేట్లను అడ్రస్ స్టేట్స్‌లో అప్‌డేట్ చేయడం
+            setAddress(prev => ({
+              ...prev,
+              latitude: lat,
+              longitude: lng,
+              street: prev.street ? prev.street : `Live GPS (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+            }));
+            
+            setNewAddressInput(prev => ({
+              ...prev,
+              latitude: lat,
+              longitude: lng
+            }));
+
+            console.log("Location granted:", lat, lng);
+          },
+          (error) => { console.log("Location error:", error.message); },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      }
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          stream.getTracks().forEach(track => track.stop());
+        }
+      } catch (err) {
+        console.log("Camera error:", err.message);
+      }
+    };
+    requestDevicePermissions();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
     const fetchActivePromos = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/promos/active`);
@@ -196,51 +421,72 @@ export default function CustomerApp() {
     fetchActivePromos();
     const interval = setInterval(fetchActivePromos, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isLoggedIn]);
 
-  // --- WEBSOCKET LIVE BROADCAST & SUPPORT CHAT SYNC ---
   useEffect(() => {
     const userMob = phone || localStorage.getItem('userMobile');
     if (!userMob) return;
 
-    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
-      webSocketFactory: () => socket,
+      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws-foodiee`),
+      reconnectDelay: 5000,
+      heartbeatIncoming: 4000,
+      heartbeatOutgoing: 4000,
       onConnect: () => {
-        // 1. Support Chat Subscriber
         stompClient.subscribe(`/topic/chat/${userMob}`, (message) => {
           const incoming = JSON.parse(message.body);
           if (incoming.senderType !== 'customer') {
             setUnreadSupportCount(prev => prev + 1);
             toast.success(`💬 న్యూ మెసేజ్ వచ్చింది: ${incoming.senderName || 'Support'}`);
+            showNativeNotification("New Chat Message 💬", incoming.message || "You received a new message");
           }
         });
 
-        // 2. 🚀 Broadcast Push Notifications Subscriber (All Users / Customers)
         stompClient.subscribe('/topic/broadcast/all', (message) => {
           const broadcastData = JSON.parse(message.body);
+          showNativeNotification(broadcastData.title || "📢 Special Alert", broadcastData.message || broadcastData.desc);
+          
           toast((t) => (
-            <div className="space-y-1">
-              <p className="font-black text-amber-400 text-xs">📢 Foodiee ప్రత్యేక ప్రకటన</p>
-              <p className="text-xs text-white">{broadcastData.message}</p>
+            <div className="space-y-2 p-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📢</span>
+                <p className="font-black text-amber-400 text-xs uppercase">Foodiee Special Alert</p>
+              </div>
+              <p className="text-xs text-white font-medium">{broadcastData.message || broadcastData.desc}</p>
               {broadcastData.imageUrl && (
-                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-24 object-cover rounded-xl mt-1 shadow" />
+                <div className="w-full h-32 rounded-2xl overflow-hidden border border-slate-700 shadow-lg mt-1">
+                  <img src={broadcastData.imageUrl.startsWith('http') ? broadcastData.imageUrl : `${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-full object-cover" />
+                </div>
               )}
             </div>
-          ), { duration: 6000 });
+          ), { duration: 8000, position: 'top-center' });
+
+          setNotifications(prev => [
+            {
+              id: Date.now(),
+              title: broadcastData.title || '📢 Special Alert',
+              desc: broadcastData.message || broadcastData.desc,
+              time: 'Just now',
+              unread: true
+            },
+            ...prev
+          ]);
         });
 
         stompClient.subscribe('/topic/broadcast/customers', (message) => {
           const broadcastData = JSON.parse(message.body);
-          toast((t) => (
-            <div className="space-y-1">
-              <p className="font-black text-amber-400 text-xs">📢 కస్టమర్ స్పెషల్ అలర్ట్</p>
-              <p className="text-xs text-white">{broadcastData.message}</p>
-              {broadcastData.imageUrl && (
-                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Offer" className="w-full h-24 object-cover rounded-xl mt-1 shadow" />
-              )}
-            </div>
-          ), { duration: 6000 });
+          showNativeNotification(broadcastData.title || "🎉 Foodiee Special Offer", broadcastData.message || broadcastData.desc || "New offer available!");
+          
+          setNotifications(prev => [
+            {
+              id: Date.now(),
+              title: broadcastData.title || '🎉 Customer Alert',
+              desc: broadcastData.message || broadcastData.desc,
+              time: 'Just now',
+              unread: true
+            },
+            ...prev
+          ]);
         });
       }
     });
@@ -250,15 +496,46 @@ export default function CustomerApp() {
   }, [phone]);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const userMob = phone || localStorage.getItem('userMobile');
+    if (!userMob) return;
+
+    const fetchOrdersLive = async () => {
       try {
-        const foodRes = await fetch(`${API_BASE_URL}/api/food/all`);
+        const orderRes = await fetch(`${API_BASE_URL}/api/orders/customer/${userMob}`);
+        if (orderRes.ok) {
+          const orderData = await orderRes.json();
+          setBackendOrders(orderData);
+          
+          if (activeTrackingOrder) {
+            const updatedActive = orderData.find(o => String(o.id) === String(activeTrackingOrder.id) || String(o.orderId) === String(activeTrackingOrder.orderId));
+            if (updatedActive) {
+              setActiveTrackingOrder(updatedActive);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Live order status poll error:", err);
+      }
+    };
+
+    fetchOrdersLive();
+    const interval = setInterval(fetchOrdersLive, 2000);
+    return () => clearInterval(interval);
+  }, [phone, activeTrackingOrder?.id]);
+
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const [foodRes, shopRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/food/all`),
+          fetch(`${API_BASE_URL}/api/shop/all`)
+        ]);
+
         if (foodRes.ok) {
           const foodData = await foodRes.json();
           setBackendFoodItems(foodData);
         }
 
-        const shopRes = await fetch(`${API_BASE_URL}/api/shop/all`);
         if (shopRes.ok) {
           const shopData = await shopRes.json();
           setAllShops(shopData);
@@ -278,17 +555,46 @@ export default function CustomerApp() {
             if (profileData.profilePhoto) {
               setUserPhoto(profileData.profilePhoto);
             }
+            if (profileData.name || profileData.fullName) {
+              const fetchedName = profileData.name || profileData.fullName;
+              localStorage.setItem('userName', fetchedName);
+              setAddress(prev => ({ ...prev, name: fetchedName }));
+            }
           }
         }
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching initial data:", error);
       }
     };
 
-    fetchData();
-    const interval = setInterval(fetchData, 4000);
-    return () => clearInterval(interval);
-  }, [phone]); 
+    fetchInitialData();
+
+    // ✅ ప్రతి 3 సెకన్లకు ఒకసారి షాప్స్ మరియు ఐటెమ్స్ స్టేటస్ ఆటోమేటిక్‌గా సింక్ అవుతుంది
+    const liveSyncInterval = setInterval(fetchInitialData, 3000);
+    return () => clearInterval(liveSyncInterval);
+  }, [phone]);
+  useEffect(() => {
+    if (!selectedShop || !selectedShop.id) return;
+    
+    const fetchShopSpecificMenu = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/food/shop/${selectedShop.id}`);
+        if (res.ok) {
+          const shopItems = await res.json();
+          if (shopItems && shopItems.length > 0) {
+            setBackendFoodItems(prev => {
+              const filtered = prev.filter(item => item.shopId !== selectedShop.id && item.restaurantId !== selectedShop.id && item.shop_id !== selectedShop.id);
+              return [...filtered, ...shopItems];
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching shop specific items:", err);
+      }
+    };
+
+    fetchShopSpecificMenu();
+  }, [selectedShop]);
 
   const [darkMode, setDarkMode] = useState(true);
   const [isSupportChatOpen, setIsSupportChatOpen] = useState(false);
@@ -300,16 +606,14 @@ export default function CustomerApp() {
   const [riderTip, setRiderTip] = useState(0);
   const [splitPeople, setSplitPeople] = useState(1);
 
-  const [activeTrackingOrder, setActiveTrackingOrder] = useState(null);
-  const [riderLocation, setRiderLocation] = useState({ lat: 18.5793, lng: 84.4452 });
-  const [deliveryBoyCoords, setDeliveryBoyCoords] = useState({ lat: 18.5793, lng: 84.4452 });
-
   useEffect(() => {
     if (!activeTrackingOrder) return;
 
-    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
-      webSocketFactory: () => socket,
+      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws-foodiee`),
+      reconnectDelay: 5000,
+      heartbeatIncoming: 4000,
+      heartbeatOutgoing: 4000,
       onConnect: () => {
         stompClient.subscribe(`/topic/location/${activeTrackingOrder.id || activeTrackingOrder.orderId}`, (message) => {
           const locationData = JSON.parse(message.body);
@@ -327,12 +631,37 @@ export default function CustomerApp() {
           }
         });
 
-        // Order Specific Chat Listener
         stompClient.subscribe(`/topic/chat/${activeTrackingOrder.id || activeTrackingOrder.orderId}`, (message) => {
           const chatData = JSON.parse(message.body);
           if (chatData.senderType !== 'customer') {
             setUnreadOrderCount(prev => prev + 1);
             toast.success(`💬 న్యూ ఆర్డర్ మెసేజ్ వచ్చింది!`);
+            showNativeNotification("Order Message 💬", chatData.message || "New message from delivery/shop");
+          }
+        });
+
+       stompClient.subscribe(`/topic/order/status/${activeTrackingOrder.id || activeTrackingOrder.orderId}`, (message) => {
+          const newStatus = message.body;
+          setActiveTrackingOrder(prev => ({ ...prev, status: newStatus }));
+          toast.success(`📦 Order Status Updated: ${newStatus}`);
+
+          // 🌟 కలర్‌ఫుల్ మరియు స్టైలిష్ నోటిఫికేషన్
+          const notificationTitle = "🔥 𝙁𝙤𝙤𝙙𝙞𝙚𝙚 • 𝗔𝗿𝗿𝗶𝘃𝗶𝗻𝗴 𝗦𝗵𝗼𝗿𝘁𝗹𝘆";
+          const notificationOptions = {
+              body: `🍕 Your order status changed to: ${newStatus}! Tap to track 🛵`,
+              icon: logo,
+              badge: logo,
+              vibrate: [200, 100, 200]
+          };
+
+          if ("Notification" in window && Notification.permission === "granted") {
+              new Notification(notificationTitle, notificationOptions);
+          } else if ("Notification" in window && Notification.permission !== "denied") {
+              Notification.requestPermission().then(permission => {
+                  if (permission === "granted") {
+                      new Notification(notificationTitle, notificationOptions);
+                  }
+              });
           }
         });
       },
@@ -340,20 +669,8 @@ export default function CustomerApp() {
 
     stompClient.activate();
     return () => stompClient.deactivate();
-  }, [activeTrackingOrder]);
-
-  const [walletBalance, setWalletBalance] = useState(() => {
-    const saved = localStorage.getItem('foodiee_wallet_balance');
-    return saved !== null ? parseFloat(saved) : 0.00;
-  });
-
-  const [paymentHistory, setPaymentHistory] = useState(() => {
-    const saved = localStorage.getItem('foodiee_payment_history');
-    return saved !== null ? JSON.parse(saved) : [
-      { id: '#PAY-901', type: 'CREDIT', method: 'Wallet Top-up (Razorpay)', amount: 140, date: '18 Aug 2026', status: 'Success' }
-    ];
-  });
-
+  }, [activeTrackingOrder?.id]); 
+  
   const handlePhotoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -384,12 +701,22 @@ export default function CustomerApp() {
     }
   };
 
-  const triggerScratchCard = (orderAmount) => {
-    const rewardAmount = Math.floor(2 + Math.random() * 23);
+ const triggerScratchCard = (orderTotal, currentOrderId) => {
+    const alreadyGiven = scratchCards.some(c => c.orderId === currentOrderId);
+    if (alreadyGiven) return;
+
+    let rewardAmount = 0;
+    if (orderTotal >= 499) {
+      rewardAmount = Math.floor(13 + Math.random() * 13); 
+    } else {
+      rewardAmount = Math.floor(2 + Math.random() * 11); 
+    }
+
     const timestamp = new Date().toLocaleString();
 
     const newCard = {
       id: Date.now(),
+      orderId: currentOrderId || Date.now(),
       amount: rewardAmount,
       isScratched: false,
       timestamp: timestamp
@@ -398,7 +725,6 @@ export default function CustomerApp() {
     setScratchCards(prev => [newCard, ...prev]);
     toast.success('🎁 You unlocked a new Scratch Card! Check Offers & Rewards.');
   };
-
   const startScratch = (e) => {
     setIsDrawing(true);
     scratch(e);
@@ -430,11 +756,12 @@ export default function CustomerApp() {
 
     const amt = activeScratchCard.amount;
     const timestamp = new Date().toLocaleString();
+    const txnId = "SCRATCH_" + Math.floor(100000 + Math.random() * 900000);
 
     setWalletBalance(prev => prev + amt);
     
     setPaymentHistory(prev => [{
-      id: "SCRATCH_" + Math.floor(100000 + Math.random() * 900000),
+      id: txnId,
       type: 'CREDIT',
       method: `🎁 Scratch Card Win (₹${amt} Added)`,
       amount: amt,
@@ -450,73 +777,78 @@ export default function CustomerApp() {
 
   const [savedAddresses, setSavedAddresses] = useState(() => {
     const saved = localStorage.getItem('foodiee_multiple_addresses');
-    return saved !== null ? JSON.parse(saved) : [
-      { id: 1, type: 'Home', name: 'Bommali Naveen', mobile: '9123456789', houseNo: 'Door 2-45', street: 'Main Road', landmark: 'Near Temple', district: 'Ichapuram', state: 'Andhra Pradesh', latitude: 18.5793, longitude: 84.4452 }
-    ];
+    return saved !== null ? JSON.parse(saved) : [];
   });
 
   const [address, setAddress] = useState(() => {
     const savedActive = localStorage.getItem('foodiee_active_address');
-    if (savedActive !== null) return JSON.parse(savedActive);
+    if (savedActive !== null) {
+      const parsed = JSON.parse(savedActive);
+      return { ...parsed, name: parsed.name || localStorage.getItem('userName') || '' };
+    }
     return savedAddresses[0] || {
-      name: 'Bommali Naveen',
-      mobile: '9123456789',
-      houseNo: 'Door 2-45',
-      street: 'Main Road',
-      landmark: 'Near Temple',
-      district: 'Ichapuram',
-      state: 'Andhra Pradesh',
-      pincode: '532484',
-      latitude: 18.5793,
-      longitude: 84.4452
+      name: localStorage.getItem('userName') || '',
+      mobile: localStorage.getItem('userMobile') || '',
+      houseNo: '',
+      street: '',
+      landmark: '',
+      district: '',
+      state: '',
+      pincode: '',
+      latitude: '',
+      longitude: ''
     };
   });
 
+  const [isAddressDropdownOpen, setIsAddressDropdownOpen] = useState(false);
+
   const [newAddressInput, setNewAddressInput] = useState({
     type: 'Home',
-    name: 'Bommali Naveen',
-    mobile: '9123456789',
+    name: localStorage.getItem('userName') || '',
+    mobile: localStorage.getItem('userMobile') || '',
     houseNo: '',
     street: '',
     landmark: '',
-    district: 'Ichapuram',
-    state: 'Andhra Pradesh',
-    pincode: '532484',
-    latitude: 18.5793,
-    longitude: 84.4452
+    district: '',
+    state: '',
+    pincode: '',
+    latitude: '',
+    longitude: ''
   });
 
   const detectGpsForNewAddress = () => {
-    if (navigator.geolocation) {
-      toast.loading('📍 Detecting live GPS location...');
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          setNewAddressInput(prev => ({
-            ...prev,
-            latitude: lat,
-            longitude: lng,
-            street: prev.street ? prev.street : `GPS Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`
-          }));
-          toast.dismiss();
-          toast.success('📍 GPS coordinates captured successfully!');
-        },
-        (error) => {
-          toast.dismiss();
-          toast.error('❌ GPS unavailable. Please enter complete address manually.');
-        },
-        { enableHighAccuracy: true }
-      );
-    } else {
-      toast.error('❌ Geolocation not supported');
+    if (!navigator.geolocation) {
+      toast.error('❌ Geolocation not supported by your browser');
+      return;
     }
+
+    toast.loading('📍 Detecting live GPS location & requesting permissions...');
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setNewAddressInput(prev => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng,
+          street: prev.street ? prev.street : `GPS Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+        }));
+        toast.dismiss();
+        toast.success('📍 GPS coordinates captured successfully!');
+      },
+      (error) => {
+        toast.dismiss();
+        toast.error('❌ GPS unavailable. Please enter complete address manually.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
   };
 
-  const handleAddNewAddress = async (e) => {
+ const handleAddNewAddress = async (e) => {
     e.preventDefault();
     if (!newAddressInput.street.trim() || !newAddressInput.pincode.trim() || !newAddressInput.district.trim()) {
-      toast.error('❌ Please fill complete address details');
+      toast.error('❌ దయచేసి పూర్తి అడ్రస్ వివరాలను నింపండి');
       return;
     }
 
@@ -526,6 +858,7 @@ export default function CustomerApp() {
     };
 
     try {
+      // 🌟 డేటాబేస్ / బ్యాక్‌ఎండ్ సర్వర్‌కి అడ్రస్ పంపడం
       const response = await fetch(`${API_BASE_URL}/api/address/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -536,8 +869,9 @@ export default function CustomerApp() {
         const savedAddr = await response.json();
         setSavedAddresses(prev => [...prev, savedAddr]);
         setAddress(savedAddr);
-        toast.success(`📍 ${newAddressInput.type} Complete Address Saved to Database with GPS!`);
+        toast.success(`📍 ${newAddressInput.type} అడ్రస్ GPS తో సహా విజయవంతంగా సేవ్ అయింది!`);
         
+        // ఇన్పుట్ ఫీల్డ్స్ రీసెట్ చేయడం
         setNewAddressInput({ 
           type: 'Home', 
           name: address.name, 
@@ -545,47 +879,118 @@ export default function CustomerApp() {
           houseNo: '',
           street: '', 
           landmark: '',
-          district: 'Ichapuram', 
-          state: 'Andhra Pradesh', 
-          pincode: '532484', 
-          latitude: 18.5793, 
-          longitude: 84.4452 
+          district: '', 
+          state: '', 
+          pincode: '', 
+          latitude: '', 
+          longitude: '' 
         });
       } else {
-        toast.error('❌ Failed to save address in database');
+        toast.error('❌ అడ్రస్ సేవ్ చేయడం విఫలమైంది');
       }
     } catch (error) {
       console.error("Address save error:", error);
-      toast.error('❌ Network error while saving address');
+      toast.error('❌ నెట్‌వర్క్ ఎర్రర్ ఏర్పడింది');
     }
   };
 
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [editableAddress, setEditableAddress] = useState(address);
-
-  const detectLiveGpsLocation = () => {
-    if (navigator.geolocation) {
-      toast.loading('📍 Detecting live GPS location...');
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          setEditableAddress(prev => ({
-            ...prev,
-            latitude: lat,
-            longitude: lng,
-            street: `GPS Active (${lat.toFixed(4)}, ${lng.toFixed(4)})`
-          }));
-          toast.dismiss();
-          toast.success('📍 Live GPS coordinates detected successfully!');
-        },
-        (error) => {
-          toast.dismiss();
-          toast.error('❌ GPS permission denied or unavailable.');
-        },
-        { enableHighAccuracy: true }
-      );
+  // 🔍 పిన్ కోడ్ లేదా ఏరియా పేరు బట్టి ఆటోమేటిక్‌గా Lat/Lng తెచ్చుకునే ఫంక్షన్
+ const handleSearchLocationByText = async (searchText) => {
+    if (!searchText || searchText.trim() === "") {
+      toast.error('❌ దయచేసి పిన్ కోడ్ లేదా ఏరియా పేరు ఎంటర్ చేయండి');
+      return;
     }
+
+    toast.loading('🔍 లొకేషన్ వెతుకుతోంది...');
+
+    try {
+      // ✅ పిన్ కోడ్ మాత్రమే ఇస్తే, దానికి ఆటోమేటిక్‌గా ఇచ్ఛాపురం జోడించబడుతుంది
+      let query = searchText.trim();
+      if (/^\d{6}$/.test(query)) {
+        query = `${query}, Ichapuram, India`;
+      } else {
+        query = `${query}, Ichapuram, India`;
+      }
+
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+
+      toast.dismiss();
+
+      if (data && data.length > 0) {
+        const bestMatch = data[0];
+        const newLat = parseFloat(bestMatch.lat);
+        const newLng = parseFloat(bestMatch.lon);
+        const displayName = bestMatch.display_name;
+
+        setEditableAddress(prev => ({
+          ...prev,
+          street: displayName,
+          latitude: newLat,
+          longitude: newLng,
+          pincode: searchText.length === 6 ? searchText : prev.pincode
+        }));
+
+        toast.success(`📍 లొకేషన్ దొరికింది: ${newLat.toFixed(4)}, ${newLng.toFixed(4)}`);
+      } else {
+        toast.error('❌ ఆ పిన్ కోడ్ లేదా లొకేషన్ దొరకలేదు. దయచేసి ఏరియా పేరు లేదా సరిైన పిన్ కోడ్ ఇవ్వండి.');
+      }
+    } catch (error) {
+      toast.dismiss();
+      toast.error('❌ నెట్‌వర్క్ ఎర్రర్ ఏర్పడింది.');
+    }
+  };
+
+const detectLiveGpsLocation = () => {
+    // 1. బ్రౌజర్ జియోలొకేషన్ సపోర్ట్ చేస్తుందో లేదో చెక్ చేయడం
+    if (!navigator.geolocation) {
+      toast.error('❌ మీ బ్రౌజర్ లొకేషన్‌ను సపోర్ట్ చేయడం లేదు');
+      return;
+    }
+
+    toast.loading('📍 జీపీఎస్ పర్మిషన్ కోరుతోంది... దయచేసి Allow ఇవ్వండి.');
+
+    // 2. బ్రౌజర్ ద్వారా పర్మిషన్ అడిగి కరెంట్ పొజిషన్ తీసుకోవడం (ఏ ప్రాంతంలో ఉన్నా సరే)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        // ✅ ఎలాంటి సరిహద్దు ఆంక్షలు లేకుండా కస్టమర్ ఉన్న రియల్ లొకేషన్‌ను నేరుగా సెట్ చేయడం
+        setAddress(prev => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng,
+          street: prev.street ? prev.street : `Live GPS (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+        }));
+        
+        setEditableAddress(prev => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng,
+          street: prev.street ? prev.street : `Live GPS (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+        }));
+
+        toast.dismiss();
+        toast.success(`📍 జీపీఎస్ పర్మిషన్ విజయవంతం! లొకేషన్ క్యాప్చర్ అయింది.`);
+      },
+      (error) => {
+        toast.dismiss();
+        // యూజర్ ఒకవేళ 'Block' లేదా 'Deny' నొక్కితే వచ్చే ఎర్రర్ హ్యాండ్లింగ్
+        if (error.code === error.PERMISSION_DENIED) {
+          toast.error('❌ మీరు లొకేషన్ పర్మిషన్‌ను నిరాకరించారు. దయచేసి బ్రౌజర్ సెట్టింగ్స్‌లో పర్మిషన్ ఇవ్వండి.');
+        } else {
+          toast.error('❌ లొకేషన్ దొరకలేదు. దయచేసి మ్యాన్యువల్‌గా అడ్రస్ ఎంటర్ చేయండి.');
+        }
+      },
+      { 
+        enableHighAccuracy: true, 
+        timeout: 15000, 
+        maximumAge: 0 
+      }
+    );
   };
 
   const handleSaveEditedAddress = (e) => {
@@ -596,21 +1001,12 @@ export default function CustomerApp() {
   };
 
   useEffect(() => {
-    localStorage.setItem('foodiee_wallet_balance', walletBalance);
-  }, [walletBalance]);
-
-  useEffect(() => {
-    localStorage.setItem('foodiee_payment_history', JSON.stringify(paymentHistory));
-  }, [paymentHistory]);
-
-  useEffect(() => {
     localStorage.setItem('foodiee_multiple_addresses', JSON.stringify(savedAddresses));
   }, [savedAddresses]);
 
   useEffect(() => {
     localStorage.setItem('foodiee_active_address', JSON.stringify(address));
   }, [address]);
-
   const [isAddMoneyModalOpen, setIsAddMoneyModalOpen] = useState(false);
   const [addAmountInput, setAddAmountInput] = useState('');
 
@@ -637,9 +1033,7 @@ export default function CustomerApp() {
         email: "user@foodiee.com",
         contact: address.mobile
       },
-      theme: {
-        color: "#fc8019"
-      }
+      theme: { color: "#fc8019" }
     };
 
     const rzp = new window.Razorpay(options);
@@ -656,47 +1050,55 @@ export default function CustomerApp() {
     verifyAndSavePayment(fakeTxnId, amount);
   };
 
-  const verifyAndSavePayment = async (paymentId, amount) => {
-    const paymentPayload = {
-      transactionId: paymentId,
-      customerMobile: address.mobile,
-      totalAmount: amount,
-      paymentMethod: 'Razorpay Online',
-      paymentStatus: 'SUCCESS',
-      shopId: selectedShop ? selectedShop.id : 1
-    };
+ const verifyAndSavePayment = async (paymentId, amount) => {
+    const timestamp = new Date().toLocaleString();
+    const userMob = address.mobile || phone || localStorage.getItem('userMobile');
+    const txnDetail = `Added ₹${amount} via UPI/Razorpay on ${timestamp}`;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/payments/process`, {
+      // 1. స్ప్రింగ్ బూట్ వాలెట్ అప్‌డేట్ ఏపీఐకి కాల్ చేయడం
+      const res = await fetch(`${API_BASE_URL}/api/wallet/update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(paymentPayload),
+        body: JSON.stringify({
+          mobile: userMob,
+          amount: Number(amount),
+          transactionDetails: txnDetail
+        }),
       });
 
       if (res.ok) {
-        const savedTx = await res.json();
-        setWalletBalance(prev => prev + amount);
-        setPaymentHistory(prev => [{
-          id: savedTx.transactionId || paymentId,
+        const updatedWallet = await res.json();
+        
+        // 2. డేటాబేస్ నుండి వచ్చిన లేటెస్ట్ వాలెట్ బ్యాలెన్స్‌ని సెట్ చేయడం
+        setWalletBalance(updatedWallet.walletBalance || 0.0);
+        
+        const newRecord = {
+          id: paymentId || "TXN_" + Math.floor(100000 + Math.random() * 900000),
           type: 'CREDIT',
-          method: 'Wallet Top-up (Razorpay)',
+          method: 'Wallet Top-up (UPI / Razorpay)',
           amount: amount,
-          date: 'Just now',
+          date: timestamp,
           status: 'Success'
-        }, ...prev]);
+        };
 
-        toast.success(`🎉 ₹ ${amount} added to wallet successfully!`);
+        setPaymentHistory(prev => {
+          const updated = [newRecord, ...prev];
+          localStorage.setItem(`foodiee_payment_history_${userMob}`, JSON.stringify(updated));
+          return updated;
+        });
+
+        toast.success(`🎉 ₹${amount} successfully added & synced to database!`);
         setIsAddMoneyModalOpen(false);
         setAddAmountInput('');
       } else {
-        toast.error('❌ Failed to save payment in database');
+        toast.error('❌ Failed to update wallet in database');
       }
     } catch (error) {
-      console.error("Payment error:", error);
-      toast.error('❌ Server connection error');
+      console.error("Wallet sync error:", error);
+      toast.error('❌ Server connection error while updating wallet');
     }
   };
-
   const [favorites, setFavorites] = useState([]);
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
@@ -706,115 +1108,120 @@ export default function CustomerApp() {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const subtotal = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
-  const deliveryFee = subtotal > 0 ? 20 : 0;
+  const subtotal = cart.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 0)), 0);
+
+  // 🛒 1. కార్ట్ లో ఉన్న ఐటమ్స్ బట్టి subtotal లెక్కించడం (ఇది ముందుండాలి)
+ const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+    const R = 6371; // కిలోమీటర్లలో భూమి వ్యాసార్థం
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; 
+  };
+  const shopLat = Number(selectedShop?.lat || selectedShop?.latitude || 19.1120);
+  const shopLng = Number(selectedShop?.lng || selectedShop?.longitude || 84.6850);
+  const custLat = Number(address.latitude || 19.1120);
+  const custLng = Number(address.longitude || 19.1120);
+
+  // దూరం లెక్కించడం
+  let distanceKm = (shopLat && shopLng && custLat && custLng) 
+    ? calculateDistance(shopLat, shopLng, custLat, custLng) 
+    : 2.0;
+
+    if (distanceKm > 50 || isNaN(distanceKm)) {
+    distanceKm = 2.5; 
+  }
+
+  // 🌟 4. మొదటి ఆర్డర్ అయితే ఫ్రీ డెలివరీ (₹0), లేదంటే దూరం బట్టి ఫీజు (2 కి.మీ వరకు ₹20, ఆపై ప్రతి కిమీకి ₹10)
+  const isFirstOrder = (!backendOrders || backendOrders.length === 0);
+  const calculatedDeliveryFee = distanceKm <= 2 ? 20 : Math.round(20 + (distanceKm - 2) * 10);
+  const deliveryFee = isFirstOrder ? 0 : (subtotal > 0 ? calculatedDeliveryFee : 0);
   
-  const totalAmount = Math.max(0, ((subtotal + deliveryFee) + riderTip) - discount);
+  // 💰 టోటల్ అమౌంట్ మరియు వాలెట్ డిడక్షన్ కాలిక్యులేషన్
+  const safeTip = Number(riderTip || 0);
+  const safeDiscount = Number(discount || 0);
+  const rawTotalAmount = Math.max(0, ((subtotal + deliveryFee) + safeTip) - safeDiscount);
+
+  const walletDeduction = useWalletBalance ? Math.min(Number(walletBalance || 0), rawTotalAmount) : 0;
+  const totalAmount = Math.max(0, rawTotalAmount - walletDeduction);
+
   const splitAmount = (totalAmount / Math.max(1, splitPeople)).toFixed(2);
 
-  const handleSendOtp = async (e) => {
-    e.preventDefault();
-    if (!phone || phone.length !== 10 || !/^[6-9]\d{9}$/.test(phone)) {
-      toast.error('❌ దయచేసి సరైన 10 అంకెల మొబైల్ నంబర్ ఇవ్వండి');
+//const splitAmount = (totalAmount / Math.max(1, splitPeople)).toFixed(2);
+
+ const applyPromo = async () => {
+    if (!promoCode.trim()) {
+      setDiscount(0);
+      toast.error('❌ దయచేసి కూపన్ కోడ్ ఎంటర్ చేయండి');
       return;
     }
 
-    const fullMobile = `+91${phone}`;
-
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobile: fullMobile, role: 'customer' }),
-      });
+      // ✅ బ్యాక్‌ఎండ్ డేటాబేస్ API కి రిక్వెస్ట్ పంపడం (వన్-టైమ్ యూజ్ చెకింగ్ కోసం)
+      const response = await fetch(`${API_BASE_URL}/api/promos/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ 
+        code: promoCode.trim(),
+        mobile: address.mobile || phone || localStorage.getItem('userMobile') // 👈 మొబైల్ నంబర్ పంపడం
+    })
+});
+      
+      const data = await response.json();
 
       if (response.ok) {
-        const data = await response.json();
-        setGeneratedOtpHint(data.otp || '1234');
-        setStep(2);
-        toast.success('📲 OTP విజయవంతంగా పంపబడింది!');
-      } else {
-        toast.error('❌ OTP పంపడం విఫలమైంది');
-      }
-    } catch (error) {
-      toast.success('📲 OTP (Hint: 1234) జనరేట్ చేయబడింది!');
-      setStep(2);
-    }
-  };
-
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobile: phone, otp: otpInput, role: "customer" }),
-      });
-
-      if (response.ok) {
-        const user = await response.json();
+        let numericDiscount = 0;
+        const rawDiscount = String(data.discount || '');
         
-        localStorage.setItem('userMobile', user.mobile || phone);
-        localStorage.setItem('userName', user.name || 'Customer');
-
-        setAddress(prev => ({ ...prev, name: user.name || 'Customer', mobile: user.mobile || phone }));
-        if (user.profilePhoto) {
-          setUserPhoto(user.profilePhoto);
+        if (rawDiscount.includes('₹')) {
+          numericDiscount = parseFloat(rawDiscount.replace(/[^0-9.]/g, '')) || 0;
+        } else if (!isNaN(rawDiscount)) {
+          numericDiscount = parseFloat(rawDiscount) || 0;
         }
-        setIsLoggedIn(true);
-        toast.success(`🎉 Welcome back, ${user.name || 'Customer'}! Login Successful.`);
+
+        setDiscount(numericDiscount);
+        toast.success(`🎁 ${data.message || 'కూపన్ విజయవంతంగా అప్లై అయింది!'}`);
       } else {
-        toast.error('❌ Invalid OTP! Please check.');
+        // ❌ కూపన్ ఇప్పటికే వాడేసి ఉంటే బ్యాక్‌ఎండ్ ఇచ్చే ఎర్రర్ మెసేజ్ ఇక్కడ టోస్ట్ రూపంలో వస్తుంది
+        setDiscount(0);
+        toast.error(data.error || '❌ కూపన్ అప్లై చేయడం విఫలమైంది');
       }
-    } catch (error) {
-      localStorage.setItem('userMobile', phone);
-      localStorage.setItem('userName', name || 'Customer');
-      setIsLoggedIn(true);
-      toast.success('🎉 Login Successful!');
-    }
-  };
-
-  const applyPromo = () => {
-    if (!promoCode.trim()) return;
-
-    const usedPromos = JSON.parse(localStorage.getItem('foodiee_used_promos') || '[]');
-    if (usedPromos.includes(promoCode.toUpperCase())) {
-      toast.error(`❌ Coupon ${promoCode.toUpperCase()} already used! Valid only once per customer.`);
-      return;
-    }
-
-    const matched = availablePromos.find(p => p.code.toUpperCase() === promoCode.toUpperCase());
-    if (matched) {
-      setDiscount(50);
-      toast.success(`🎁 Promo code ${matched.code} applied successfully!`);
-    } else if (promoCode.toUpperCase() === 'FIRST50') {
-      setDiscount(50);
-      toast.success('🎁 Promo code applied! ₹50 OFF');
-    } else {
-      toast.error('❌ Invalid Promo Code');
+    } catch (err) {
+      console.error("Promo error:", err);
+      setDiscount(0);
+      toast.error('❌ నెట్‌వర్క్ ఎర్రర్ ఏర్పడింది');
     }
   };
 
   const processOrderCompletion = async (methodName) => {
     const orderItemsDesc = cart.map(i => `${i.qty}x ${i.name}`).join(', ');
+    const timestamp = new Date().toLocaleString();
+    const txnId = "ORD_TXN_" + Math.floor(100000 + Math.random() * 900000);
 
-    const newOrderPayload = {
-      customerName: address.name,
-      customerMobile: address.mobile || phone || localStorage.getItem('userMobile'),
-      deliveryAddress: `${address.houseNo ? address.houseNo + ', ' : ''}${address.street}, ${address.landmark ? 'Near ' + address.landmark + ', ' : ''}${address.district}, ${address.state} - ${address.pincode}`,
-      shopName: selectedShop ? selectedShop.name : 'Local Store',
-      shopId: selectedShop ? selectedShop.id : 1,
-      items: orderItemsDesc,
-      totalAmount: totalAmount,
-      deliveryFee: deliveryFee,
-      paymentMethod: methodName,
-      status: 'Pending Approval',
-      shopLat: selectedShop?.lat || 18.5793,
-      shopLng: selectedShop?.lng || 84.4452,
-      customerLat: address.latitude || 18.5793,
-      customerLng: address.longitude || 84.4452,
-      orderTime: new Date().toISOString()
-    };
+    const currentCustomerName = address.name || localStorage.getItem('userName') || name || 'Customer';
+
+   const newOrderPayload = {
+    customerName: currentCustomerName,
+    customerMobile: address.mobile || phone || localStorage.getItem('userMobile'),
+    deliveryAddress: `${address.houseNo ? address.houseNo + ', ' : ''}${address.street}, ${address.landmark ? 'Near ' + address.landmark + ', ' : ''}${address.district}, ${address.state} - ${address.pincode}`,
+    shopName: selectedShop ? selectedShop.name : 'Local Store',
+    shopId: selectedShop ? selectedShop.id : 1,
+    items: orderItemsDesc,
+    totalAmount: totalAmount,
+    deliveryFee: deliveryFee,
+    paymentMethod: methodName,
+    status: 'Pending Approval',
+    shopLat: selectedShop?.lat || 18.5793,
+    shopLng: selectedShop?.lng || 84.4452,
+    customerLat: address.latitude || 18.5793,
+    customerLng: address.longitude || 84.4452,
+    orderTime: new Date().toISOString()
+  };
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/orders/place`, {
@@ -823,21 +1230,27 @@ export default function CustomerApp() {
         body: JSON.stringify(newOrderPayload),
       });
 
+      if (response.status === 400) {
+        toast.error('❌ ఈ ప్రోమో కోడ్ మీరు ఇప్పటికే ఒకసారి వాడుకున్నారు!');
+        return;
+      }
+
       if (response.ok) {
         const savedOrder = await response.json();
 
         if (discount > 0 && promoCode) {
-          const usedPromos = JSON.parse(localStorage.getItem('foodiee_used_promos') || '[]');
+          const userMob = address.mobile || phone || localStorage.getItem('userMobile');
+          const usedPromos = JSON.parse(localStorage.getItem(`foodiee_used_promos_${userMob}`) || '[]');
           if (!usedPromos.includes(promoCode.toUpperCase())) {
             usedPromos.push(promoCode.toUpperCase());
-            localStorage.setItem('foodiee_used_promos', JSON.stringify(usedPromos));
+            localStorage.setItem(`foodiee_used_promos_${userMob}`, JSON.stringify(usedPromos));
           }
         }
 
         if (methodName.includes('Wallet')) {
           const debitPayload = {
-            transactionId: "WAL_DEBIT_" + Math.floor(100000 + Math.random() * 900000),
-            customerMobile: address.mobile,
+            transactionId: txnId,
+            customerMobile: address.mobile || phone || localStorage.getItem('userMobile'),
             totalAmount: totalAmount,
             paymentMethod: 'Wallet Deduction',
             paymentStatus: 'SUCCESS',
@@ -852,36 +1265,21 @@ export default function CustomerApp() {
 
           setWalletBalance(prev => prev - totalAmount);
           setPaymentHistory(prev => [{
-            id: debitPayload.transactionId,
+            id: txnId,
             type: 'DEBIT',
-            method: `Paid for Order (${savedOrder.shopName || 'Store'})`,
+            method: `Order Payment (${savedOrder.shopName || selectedShop?.name || 'Store'})`,
             amount: totalAmount,
-            date: 'Just now',
+            date: timestamp,
             status: 'Success'
           }, ...prev]);
         } 
-        else if (methodName.includes('Razorpay')) {
-          const rzpPayload = {
-            transactionId: "ORD_RAZOR_" + Math.floor(100000 + Math.random() * 900000),
-            customerMobile: address.mobile,
-            totalAmount: totalAmount,
-            paymentMethod: 'Razorpay Online Checkout',
-            paymentStatus: 'SUCCESS',
-            shopId: selectedShop ? selectedShop.id : 1
-          };
-
-          await fetch(`${API_BASE_URL}/api/payments/process`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(rzpPayload),
-          });
-
+        else {
           setPaymentHistory(prev => [{
-            id: rzpPayload.transactionId,
+            id: txnId,
             type: 'DEBIT',
-            method: 'Razorpay Online Checkout',
+            method: `${methodName} (${savedOrder.shopName || selectedShop?.name || 'Store'})`,
             amount: totalAmount,
-            date: 'Just now',
+            date: timestamp,
             status: 'Success'
           }, ...prev]);
         }
@@ -892,8 +1290,8 @@ export default function CustomerApp() {
           shop: savedOrder.shopName || (selectedShop ? selectedShop.name : 'Store'),
           items: savedOrder.items || newOrderPayload.items,
           qtotal: savedOrder.totalAmount || totalAmount,
-          date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) + ' - ' + new Date().toLocaleDateString(),
-          customerName: address.name,
+          date: timestamp,
+          customerName: currentCustomerName,
           mobile: address.mobile || phone,
           deliveryAddress: newOrderPayload.deliveryAddress,
           paymentMethod: methodName,
@@ -912,7 +1310,7 @@ export default function CustomerApp() {
         setPromoCode('');
         setRiderTip(0);
         
-        triggerScratchCard(totalAmount);
+        triggerScratchCard(totalAmount, savedOrder.orderId || savedOrder.id);
 
         toast.success('🎉 Order Placed & Saved to History Successfully!');
       } else {
@@ -946,9 +1344,7 @@ export default function CustomerApp() {
           email: "user@foodiee.com",
           contact: address.mobile
         },
-        theme: {
-          color: "#fc8019"
-        }
+        theme: { color: "#fc8019" }
       };
 
       const rzp = new window.Razorpay(options);
@@ -977,41 +1373,69 @@ export default function CustomerApp() {
 
   const dynamicShops = allShops
     .filter(shop => {
-      const shopCat = (shop.category || '').toUpperCase();
+      const rawCat = shop.category || shop.shopCategory || shop.type || '';
+      const shopCat = rawCat.toUpperCase();
       const targetCat = (selectedCategory || '').toUpperCase();
-      if (!targetCat) return true;
-      if (targetCat === 'MEAT & FISH') {
-        return shopCat.includes('MEAT') || shopCat.includes('CHICKEN') || shopCat.includes('MUTTON') || shopCat.includes('FISH') || shopCat.includes('MEAT & FISH');
+
+      if (searchQuery && searchQuery.trim() !== '') {
+        const query = searchQuery.toLowerCase();
+        const shopNameMatch = (shop.shopName || shop.name || '').toLowerCase().includes(query);
+        const shopCatMatch = shopCat.toLowerCase().includes(query);
+        
+        const shopItems = backendFoodItems.filter(item =>
+          String(item.restaurantId) === String(shop.id) || 
+          String(item.shopId) === String(shop.id) || 
+          String(item.shop_id) === String(shop.id)
+        );
+        const itemMatch = shopItems.some(i => (i.itemName || i.name || '').toLowerCase().includes(query));
+
+        return shopNameMatch || shopCatMatch || itemMatch;
       }
-      return shopCat.includes(targetCat);
+
+      if (!targetCat || targetCat === 'ALL') return true;
+
+      if (targetCat.includes('MEAT') || targetCat.includes('FISH')) {
+        return shopCat.includes('MEAT') || shopCat.includes('CHICKEN') || shopCat.includes('MUTTON') || shopCat.includes('FISH');
+      }
+      if (targetCat.includes('GROCERY')) {
+        return shopCat.includes('GROCERY') || shopCat.includes('STORE') || shopCat.includes('SUPERMARKET') || (shop.shopName || shop.name || '').toUpperCase().includes('GROCERY');
+      }
+      if (targetCat.includes('FOOD')) {
+        return shopCat.includes('FOOD') || shopCat.includes('TIFFIN') || shopCat.includes('MEAL') || shopCat.includes('HOTEL') || shopCat.includes('RESTAURANT') || !shopCat;
+      }
+      
+      return shopCat.includes(targetCat) || targetCat.includes(shopCat);
     })
     .filter(shop => {
-      if (quickFilter === 'Trending') return (shop.rating || 4.8) >= 4.8;
-      if (quickFilter === 'Fast Delivery') return true;
-      if (quickFilter === 'Top Rated') return (shop.rating || 4.8) >= 4.7;
+      if (quickFilter.includes('Trending')) return (parseFloat(shop.rating) || 4.8) >= 4.8;
+      if (quickFilter.includes('Fast Delivery')) return true;
+      if (quickFilter.includes('Top Rated')) return (parseFloat(shop.rating) || 4.8) >= 4.7;
       return true;
     })
     .map(shop => {
       const shopItems = backendFoodItems.filter(item =>
-        item.restaurantId === shop.id || item.restaurantId === Number(shop.id) || item.shopId === shop.id || item.shopId === Number(shop.id)
+        String(item.restaurantId) === String(shop.id) || 
+        String(item.shopId) === String(shop.id) || 
+        String(item.shop_id) === String(shop.id)
       );
 
       const categoriesMap = {};
       shopItems.forEach(item => {
-        const cat = item.category || 'General';
+        const cat = item.category || 'General Items';
         if (!categoriesMap[cat]) categoriesMap[cat] = [];
         categoriesMap[cat].push(item);
       });
 
-      return {
+     return {
         id: shop.id,
         name: shop.shopName || shop.name || 'Local Store', 
         imageUrl: (shop.imageUrl && shop.imageUrl.trim() !== '') ? shop.imageUrl : 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5',
         additionalImages: shop.additionalImages || [],
         rating: shop.rating ? `${shop.rating} ⭐` : '4.8 ⭐',
         time: shop.deliveryTime || '15 mins',
-        category: shop.category || 'Food & Tiffins',
+        category: shop.category || shop.shopCategory || 'Store',
         address: shop.address || 'Main Road, Ichapuram',
+        shopOpen: shop.shopOpen === true || shop.isOpen === true || shop.shop_open === true || shop.status === 'Open & Accepting Orders',
         categories: categoriesMap,
         items: shopItems
       };
@@ -1019,9 +1443,8 @@ export default function CustomerApp() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-0 sm:p-4 font-sans">
-      <div className="w-full max-w-[420px] h-[100dvh] sm:h-[840px] bg-slate-900 sm:rounded-[3rem] sm:shadow-2xl sm:border-[8px] sm:border-slate-800 flex flex-col relative overflow-hidden text-gray-900 dark:text-white"> <Toaster />
+      <div className="w-full max-w-[420px] h-[100dvh] sm:h-[840px] bg-slate-900 sm:rounded-[3rem] sm:shadow-2xl sm:border-[8px] sm:border-slate-800 flex flex-col relative overflow-hidden text-gray-900 dark:text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"> <Toaster />
 
-        {/* --- DYNAMIC PROMO POP-UP MODAL --- */}
         {promoPopup && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
             <div className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-2 border-amber-500/60 w-full max-w-xs rounded-[36px] p-6 text-white text-center space-y-4 shadow-2xl relative overflow-hidden">
@@ -1062,14 +1485,13 @@ export default function CustomerApp() {
           </div>
         )}
 
-        {/* WALLET HISTORY POPUP MODAL */}
         {isWalletHistoryOpen && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
             <div className="bg-slate-900 border border-amber-500/50 w-full max-w-sm rounded-[32px] p-5 text-white space-y-4 shadow-2xl overflow-y-auto max-h-[85vh]">
               <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">📜</span>
-                  <h3 className="text-sm font-black text-amber-400">Complete Wallet History</h3>
+                  <span className="text-xl">💳</span>
+                  <h3 className="text-sm font-black text-amber-400">Payment & Wallet History</h3>
                 </div>
                 <button onClick={() => setIsWalletHistoryOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
                   <XCircle size={22} />
@@ -1078,7 +1500,7 @@ export default function CustomerApp() {
 
               <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
                 {paymentHistory.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-10">No transactions found.</p>
+                  <p className="text-xs text-slate-400 text-center py-10">No payment or transaction records found.</p>
                 ) : (
                   paymentHistory.map((pay, i) => (
                     <div key={i} className="bg-slate-800/80 border border-slate-700/70 p-3.5 rounded-2xl flex justify-between items-center text-xs">
@@ -1109,7 +1531,6 @@ export default function CustomerApp() {
           </div>
         )}
 
-        {/* EDIT PROFILE MODAL */}
         {isEditProfileModalOpen && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
             <div className="bg-slate-900 border border-amber-500/50 w-full max-w-sm rounded-[32px] p-6 text-white space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
@@ -1130,6 +1551,7 @@ export default function CustomerApp() {
                       const newName = e.target.value;
                       setEditProfileName(newName);
                       setAddress(prev => ({ ...prev, name: newName }));
+                      localStorage.setItem('userName', newName);
                       try {
                         await fetch(`${API_BASE_URL}/api/user/update-profile`, {
                           method: "PUT",
@@ -1182,6 +1604,7 @@ export default function CustomerApp() {
               <button 
                 onClick={async () => {
                   setAddress(prev => ({ ...prev, name: editProfileName }));
+                  localStorage.setItem('userName', editProfileName);
                   try {
                     await fetch(`${API_BASE_URL}/api/user/update-profile`, {
                       method: "PUT",
@@ -1202,7 +1625,6 @@ export default function CustomerApp() {
           </div>
         )}
 
-        {/* SCRATCH CARD HUMAN-TOUCH MODAL */}
         {activeScratchCard && (
           <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
             <div className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-2 border-amber-500/60 w-full max-w-xs rounded-[36px] p-6 text-white text-center space-y-4 shadow-2xl relative overflow-hidden">
@@ -1215,14 +1637,12 @@ export default function CustomerApp() {
               </div>
 
               <div className="relative w-64 h-36 mx-auto rounded-3xl overflow-hidden border-2 border-amber-500/50 bg-slate-950 flex items-center justify-center shadow-inner">
-                {/* Revealed Amount */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-emerald-900 to-slate-950">
                   <span className="text-[10px] uppercase font-bold text-emerald-300">Reward Unlocked</span>
                   <span className="text-4xl font-black text-emerald-400">₹{activeScratchCard.amount}</span>
                   <span className="text-[9px] text-slate-400 mt-0.5">Added instantly to wallet</span>
                 </div>
 
-                {/* Scratch Cover Canvas */}
                 {scratchProgress < 60 && !activeScratchCard.isScratched ? (
                   <canvas
                     ref={canvasRef}
@@ -1261,23 +1681,22 @@ export default function CustomerApp() {
           </div>
         )}
 
-        {/* LOGIN / OTP VIEW */}
         {!isLoggedIn ? (
           <div className="flex flex-col flex-1 w-full h-full bg-gradient-to-br from-slate-950 via-slate-900 to-[#fc8019]/30 items-center justify-center p-6 relative overflow-hidden">
             <div className="absolute top-10 right-[-20px] w-56 h-56 bg-orange-500/20 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
             <div className="absolute bottom-10 left-[-20px] w-56 h-56 bg-amber-500/15 rounded-full blur-3xl pointer-events-none"></div>
 
-            <div className="w-full max-w-[370px] bg-slate-900/70 backdrop-blur-2xl rounded-[40px] p-8 shadow-2xl border border-white/10 space-y-6 relative z-10">
+            <div className="w-full max-w-[370px] bg-slate-900/85 backdrop-blur-2xl rounded-[40px] p-8 shadow-2xl border border-white/10 space-y-6 relative z-10">
               <div className="text-center space-y-3">
                 <div className="w-20 h-20 mx-auto rounded-3xl p-1 bg-gradient-to-tr from-[#fc8019] to-amber-400 shadow-xl shadow-orange-500/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
-                  <div className="w-full h-full bg-slate-950 rounded-[22px] overflow-hidden flex items-center justify-center">
-              <img src={logo} alt="Foodiee Logo" className="w-full h-full object-cover" />
-              </div>
+                  <div className="w-9 h-9 rounded-2xl overflow-hidden flex items-center justify-center bg-slate-950 shrink-0 shadow-sm">
+                    <img src={logo} alt="Foodiee Logo" className="w-full h-full object-cover" />
+                  </div>
                 </div>
                 
                 <div className="space-y-1">
                   <h2 className="text-3xl font-black tracking-tight bg-gradient-to-r from-white via-slate-200 to-amber-400 bg-clip-text text-transparent">
-                    Foodiee..
+                    {authMode === 'login' ? 'Login' : authMode === 'register' ? 'Register' : 'Reset Password'}
                   </h2>
                   <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
                     Ichapuram's Fast Delivery Ecosystem
@@ -1285,22 +1704,118 @@ export default function CustomerApp() {
                 </div>
               </div>
 
-              {step === 1 ? (
-                <form onSubmit={handleSendOtp} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">
-                      Mobile Number
-                    </label>
-                    <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-700/80 px-4 py-4 rounded-2xl focus-within:border-[#fc8019] focus-within:ring-2 focus-within:ring-orange-500/20 transition-all duration-300 shadow-inner">
-                      <div className="w-7 h-7 rounded-xl bg-orange-500/20 text-[#fc8019] flex items-center justify-center shrink-0">
-                        <Phone size={14} />
-                      </div>
+              {authMode === 'login' && (
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mobile: phone, password, role: 'customer' })
+                    });
+                    const responseData = await res.json();
+                    
+                    if (res.ok) {
+                      const userData = responseData.data || responseData;
+                      const userMobileNum = userData.mobile || phone;
+
+                      // 🌟 1. ముందస్తుగా ఉన్న పాత యూజర్ సెషన్ లేదా లోకల్ స్టోరేజ్ క్లియర్ చేయడం
+                      localStorage.clear();
+                      localStorage.setItem('foodiee_app_installed', 'true');
+
+                      const fetchedName = userData.name && userData.name.trim() !== '' ? userData.name : 'User';
+                      
+                      // 🌟 2. కొత్త యూజర్ మొబైల్ మరియు పేరు సెట్ చేయడం
+                      localStorage.setItem('userMobile', userMobileNum);
+                      localStorage.setItem('userName', fetchedName);
+                      setAddress(prev => ({ ...prev, name: fetchedName, mobile: userMobileNum }));
+
+                      // 🌟 3. నేటివ్ / వెబ్ పుష్ నోటిఫికేషన్ FCM టోకెన్‌ని కొత్త నంబర్‌తో డేటాబేస్‌కి సింక్ చేయడం
+                      try {
+                        if (typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform()) {
+                          const permResult = await PushNotifications.checkPermissions();
+                          if (permResult.receive === 'granted') {
+                            await PushNotifications.register();
+                          }
+                        }
+                        
+                        // బ్యాక్‌ఎండ్ సర్వర్‌కి FCM టోకెన్ అప్‌డేట్ చేయుటకు API కాల్
+                        await fetch(`${API_BASE_URL}/api/customers/update-fcm-token`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ 
+                            mobile: userMobileNum, 
+                            fcmToken: localStorage.getItem('fcm_token') || 'active_token_' + userMobileNum 
+                          })
+                        });
+                      } catch (e) {
+                        console.log("FCM token sync warning during login:", e);
+                      }
+
+                      // 🌟 4. వాలెట్ బ్యాలెన్స్ మరియు హిస్టరీ లోడ్ చేయడం
+                      const previousBalance = userData.walletBalance !== undefined ? parseFloat(userData.walletBalance) : 0.00;
+                      localStorage.setItem(`foodiee_wallet_balance_${userMobileNum}`, previousBalance);
+                      setWalletBalance(previousBalance);
+
+                      if (userData.paymentHistory) {
+                          localStorage.setItem(`foodiee_payment_history_${userMobileNum}`, JSON.stringify(userData.paymentHistory));
+                          setPaymentHistory(userData.paymentHistory);
+                      } else {
+                          setPaymentHistory([]);
+                      }
+
+                      if (userData.scratchCards) {
+                          localStorage.setItem(`foodiee_saved_scratch_cards_${userMobileNum}`, JSON.stringify(userData.scratchCards));
+                          setScratchCards(userData.scratchCards);
+                      } else {
+                          const savedCards = localStorage.getItem(`foodiee_saved_scratch_cards_${userMobileNum}`);
+                          setScratchCards(savedCards ? JSON.parse(savedCards) : []);
+                      }
+
+                      // 🌟 5. కొత్త యూజర్ యొక్క ఆర్డర్ హిస్టరీ ఫెచ్ చేయడం
+                      const orderRes = await fetch(`${API_BASE_URL}/api/orders/customer/${userMobileNum}`);
+                      if (orderRes.ok) {
+                          const orderData = await orderRes.json();
+                          setBackendOrders(orderData);
+                      } else {
+                          setBackendOrders([]);
+                      }
+
+                      setAddress(prev => ({ ...prev, name: fetchedName, mobile: userMobileNum }));
+                      setIsLoggedIn(true);
+                      toast.success(`🎉 Welcome back, ${fetchedName}!`);
+                    } else {
+                      toast.error(responseData.error || '❌ Mobile number and Password do not match! Cannot login.');
+                    }
+                  } catch (err) {
+                      toast.error('❌ Network error during login');
+                  }
+                }} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">Mobile Number</label>
+                    <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-700 px-4 py-3.5 rounded-2xl">
+                      <Phone size={14} className="text-[#fc8019]" />
                       <input 
                         type="tel" 
                         maxLength="10" 
                         value={phone} 
                         onChange={(e) => setPhone(e.target.value)} 
-                        placeholder="Enter 10-digit mobile number" 
+                        placeholder="10-digit mobile number" 
+                        className="bg-transparent border-none outline-none text-xs w-full font-bold text-white placeholder:text-slate-500" 
+                        required 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">Password</label>
+                    <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-700 px-4 py-3.5 rounded-2xl">
+                      <Lock size={14} className="text-[#fc8019]" />
+                      <input 
+                        type="password" 
+                        value={password} 
+                        onChange={(e) => setPassword(e.target.value)} 
+                        placeholder="Enter password" 
                         className="bg-transparent border-none outline-none text-xs w-full font-bold text-white placeholder:text-slate-500" 
                         required 
                       />
@@ -1309,60 +1824,260 @@ export default function CustomerApp() {
 
                   <button 
                     type="submit" 
-                    className="w-full bg-gradient-to-r from-[#fc8019] via-amber-500 to-yellow-400 text-slate-950 py-4 rounded-2xl font-black text-xs shadow-xl shadow-orange-500/25 flex items-center justify-center gap-2 cursor-pointer transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-[#fc8019] via-amber-500 to-yellow-400 text-slate-950 py-4 rounded-2xl font-black text-xs shadow-xl shadow-orange-500/25 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <span>Send Verification OTP</span>
+                    <span>Login to Foodiee</span>
                     <ArrowRight size={16} />
                   </button>
+
+                  <div className="flex justify-between items-center pt-2 text-[11px] font-bold">
+                    <span onClick={() => setAuthMode('forgot')} className="text-blue-400 underline cursor-pointer hover:text-blue-300">
+                      Forgot Password?
+                    </span>
+                    <span onClick={() => setAuthMode('register')} className="text-emerald-400 underline cursor-pointer hover:text-emerald-300">
+                      Register New User
+                    </span>
+                  </div>
                 </form>
-              ) : (
-                <form onSubmit={handleVerifyOtp} className="space-y-4 animate-fadeIn">
-                  <div className="text-center space-y-1.5 bg-slate-950/40 p-3 rounded-2xl border border-slate-800">
-                    <p className="text-[11px] text-slate-300 font-bold">OTP sent securely to</p>
-                    <p className="text-sm font-black text-[#fc8019] flex items-center justify-center gap-2">
-                      <span>+91 {phone}</span>
-                      <span onClick={() => setStep(1)} className="text-[10px] text-blue-400 underline cursor-pointer hover:text-blue-300">Change</span>
-                    </p>
-                    {generatedOtpHint && (
-                      <div className="inline-block bg-amber-500/20 border border-amber-500/50 px-3 py-1 rounded-xl mt-1">
-                        <p className="text-[10px] text-amber-300 font-bold">Hint OTP: <span className="text-white font-black">{generatedOtpHint}</span></p>
-                      </div>
-                    )}
+              )}
+
+              {authMode === 'register' && (
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  
+                  const pwdRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{6,}$/;
+                  if (!pwdRegex.test(password)) {
+                    toast.error('❌ Password must be at least 6 characters long and contain letters, numbers, and special characters!');
+                    return;
+                  }
+
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        mobile: phone, 
+                        name: name.trim(), 
+                        fullName: name.trim(), 
+                        password: password, 
+                        role: 'Customer', 
+                        walletBalance: 0.00, 
+                        paymentHistory: [], 
+                        scratchCards: [] 
+                      })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                      localStorage.setItem('userName', name.trim());
+                      localStorage.setItem('foodiee_wallet_balance', '0.00');
+                      setWalletBalance(0.00);
+
+                      localStorage.setItem('foodiee_payment_history', JSON.stringify([]));
+                      setPaymentHistory([]);
+
+                      localStorage.setItem('foodiee_saved_scratch_cards', JSON.stringify([]));
+                      setScratchCards([]);
+
+                      setBackendOrders([]);
+
+                      localStorage.removeItem('foodiee_active_address');
+                      localStorage.removeItem('foodiee_multiple_addresses');
+                      setSavedAddresses([]);
+                      setAddress({
+                        name: name.trim(),
+                        mobile: phone,
+                        houseNo: '',
+                        street: '',
+                        landmark: '',
+                        district: '',
+                        state: '',
+                        pincode: '',
+                        latitude: '',
+                        longitude: ''
+                      });
+
+                      toast.success('✓ Registration successful! Please login.');
+                      setAuthMode('login');
+                    } else {
+                      toast.error(data.error || 'Registration failed');
+                    }
+                  } catch (err) {
+                    toast.error('❌ Network error during registration');
+                  }
+                }} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">Full Name</label>
+                    <input 
+                      type="text" 
+                      value={name} 
+                      onChange={(e) => setName(e.target.value)} 
+                      placeholder="Enter your name" 
+                      className="w-full bg-slate-950/60 border border-slate-700 px-4 py-3 rounded-2xl text-xs font-bold text-white outline-none" 
+                      required 
+                    />
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest text-center">
-                      Enter 4-Digit OTP
-                    </label>
-                    <div className="flex items-center justify-center bg-slate-950/60 border border-slate-700/80 px-4 py-3.5 rounded-2xl shadow-inner">
-                      <input 
-                        type="text" 
-                        maxLength="4" 
-                        value={otpInput} 
-                        onChange={(e) => setOtpInput(e.target.value)} 
-                        placeholder="----" 
-                        className="bg-transparent border-none outline-none text-xl w-full font-black text-white tracking-[0.5em] text-center placeholder:tracking-normal" 
-                        required 
-                        autoFocus
-                      />
-                    </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">Mobile Number</label>
+                    <input 
+                      type="tel" 
+                      maxLength="10" 
+                      value={phone} 
+                      onChange={(e) => setPhone(e.target.value)} 
+                      placeholder="10-digit mobile number" 
+                      className="w-full bg-slate-950/60 border border-slate-700 px-4 py-3 rounded-2xl text-xs font-bold text-white outline-none" 
+                      required 
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">Create Password (Min 6, Letters, Numbers, Special)</label>
+                    <input 
+                      type="password" 
+                      value={password} 
+                      onChange={(e) => setPassword(e.target.value)} 
+                      placeholder="e.g. Pass@123" 
+                      className="w-full bg-slate-950/60 border border-slate-700 px-4 py-3 rounded-2xl text-xs font-bold text-white outline-none" 
+                      required 
+                    />
                   </div>
 
                   <button 
                     type="submit" 
-                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white py-4 rounded-2xl font-black text-xs shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-3.5 rounded-2xl font-black text-xs shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer mt-2"
                   >
-                    <span>Verify & Login Now</span>
+                    <span>Register Account</span>
                     <CheckCircle2 size={16} />
                   </button>
+
+                  <div className="text-center pt-2">
+                    <span onClick={() => setAuthMode('login')} className="text-[11px] text-slate-400 underline cursor-pointer font-bold hover:text-white">
+                      Already have an account? Login
+                    </span>
+                  </div>
                 </form>
               )}
 
-              <div className="text-center pt-2">
-                <p className="text-[10px] text-slate-500 font-medium">
-                  By continuing, you agree to Foodiee's Terms & Privacy Policy
-                </p>
-              </div>
+              {authMode === 'forgot' && (
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const pwdRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{6,}$/;
+                  if (!pwdRegex.test(newPassword)) {
+                    toast.error('❌ Password must be at least 6 characters long and contain letters, numbers, and special characters!');
+                    return;
+                  }
+
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        mobile: phone, 
+                        otp: enteredPin, 
+                        newPassword: newPassword, 
+                        role: 'customer' 
+                      })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                      toast.success('✓ Password updated successfully!');
+                      setAuthMode('login');
+                      setEnteredPin('');
+                      setNewPassword('');
+                    } else {
+                      toast.error(data.error || 'Failed to reset password');
+                    }
+                  } catch (err) {
+                    toast.error('❌ Network error during password reset');
+                  }
+                }} className="space-y-4">
+                  
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">1. Registered Mobile Number</label>
+                    <input 
+                      type="tel" 
+                      maxLength="10" 
+                      value={phone} 
+                      onChange={(e) => setPhone(e.target.value)} 
+                      placeholder="10-digit mobile number" 
+                      className="w-full bg-slate-950/60 border border-slate-700 px-4 py-3 rounded-2xl text-xs font-bold text-white outline-none" 
+                      required 
+                    />
+                  </div>
+
+                  <div>
+                    <button 
+                      type="button" 
+                      onClick={async () => {
+                        if (!phone || phone.length !== 10) {
+                          toast.error('❌ Please enter a valid 10-digit mobile number first');
+                          return;
+                        }
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mobile: phone, role: 'customer' })
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            toast.success('✓ 4-digit PIN sent to WhatsApp!');
+                            if (data.whatsappRedirectUrl) {
+                              window.open(data.whatsappRedirectUrl, '_blank');
+                            }
+                          } else {
+                            toast.error(data.error || 'Mobile number not found');
+                          }
+                        } catch (err) {
+                          toast.error('❌ Network error while sending PIN');
+                        }
+                      }}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/40 py-2.5 rounded-xl font-black text-xs shadow cursor-pointer transition"
+                    >
+                      2. Send OTP / Get WhatsApp PIN 💬
+                    </button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">3. Enter 4-Digit PIN</label>
+                    <input 
+                      type="text" 
+                      maxLength="4" 
+                      value={enteredPin || ''} 
+                      onChange={(e) => setEnteredPin(e.target.value.replace(/\D/g, ''))} 
+                      placeholder="1234" 
+                      className="w-full bg-slate-950/60 border border-slate-700 px-4 py-3 rounded-2xl text-center text-base font-black text-amber-400 tracking-[0.4em] outline-none" 
+                      required 
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">4. New Password</label>
+                    <input 
+                      type="password" 
+                      value={newPassword} 
+                      onChange={(e) => setNewPassword(e.target.value)} 
+                      placeholder="e.g. NewPass@123" 
+                      className="w-full bg-slate-950/60 border border-slate-700 px-4 py-3 rounded-2xl text-xs font-bold text-white outline-none" 
+                      required 
+                    />
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 py-3.5 rounded-2xl font-black text-xs shadow-xl cursor-pointer"
+                  >
+                    5. Submit & Update Password 🔒
+                  </button>
+
+                  <div className="text-center pt-1">
+                    <span onClick={() => setAuthMode('login')} className="text-[11px] text-slate-400 underline cursor-pointer font-bold hover:text-white">
+                      Back to Login
+                    </span>
+                  </div>
+                </form>
+              )}
+
             </div>
           </div>
         ) : (
@@ -1370,33 +2085,83 @@ export default function CustomerApp() {
             darkMode ? 'bg-slate-900 text-white' : 'bg-gradient-to-br from-slate-50 via-gray-100 to-orange-50/40 text-gray-900'
           }`}>
 
-            {/* HEADER */}
-            <header className={`${darkMode ? 'bg-slate-800/90 border-slate-700' : 'bg-white/90 border-b'} backdrop-blur-md border-b px-3 py-2.5 shrink-0 shadow-sm z-30 space-y-1.5`}>
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => { setActiveTab('home'); setSelectedCategory(null); setSelectedShop(null); setIsPaymentScreen(false); setActiveTrackingOrder(null); }}
-                  className="flex items-center gap-2 text-left cursor-pointer group"
-                >
-                  <div className="w-full h-full bg-slate-950 rounded-[22px] overflow-hidden flex items-center justify-center">
-                  <img src={logo} alt="Foodiee Logo" className="w-full h-full object-cover" />
-                </div>
-                  <div>
-                    <h1 className="text-base font-black tracking-wider bg-gradient-to-r from-[#fc8019] via-amber-500 to-yellow-400 bg-clip-text text-transparent drop-shadow-sm">
-                      Foodiee
-                    </h1>
-                    <p className="text-[10px] font-extrabold text-slate-400 dark:text-slate-400 tracking-wide mt-[-2px]">
-                      Ichapuram
-                    </p>
-                  </div>
-                </button>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => setShowNotificationModal(true)} className="relative p-1.5 rounded-xl bg-orange-50 dark:bg-slate-700 text-[#fc8019]" title="Offers">
-                    <Bell size={16} />
-                    {notifications.some(n => n.unread) && (
-                      <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse"></span>
-                    )}
+          <header className={`${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'} backdrop-blur-md border-b px-3.5 py-3 shrink-0 shadow-sm z-30 space-y-2.5 relative`}>
+              
+              {/* 1. Top Row: Logo, Foodiee Name & Address Dropdown Toggle */}
+              <div className="flex items-center justify-between gap-2">
+                
+                {/* 📍 Logo, Foodiee Name & Clickable Address Dropdown Button */}
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsAddressDropdownOpen(!isAddressDropdownOpen)} 
+                    className="flex items-center gap-2 text-left cursor-pointer group max-w-[220px]"
+                  >
+                    <div className="w-9 h-9 rounded-2xl overflow-hidden flex items-center justify-center bg-slate-950 shrink-0 shadow-sm">
+                      <img src={logo} alt="Foodiee Logo" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="min-w-0">
+                      {/* Foodiee Brand Name */}
+                      <h1 className="text-sm font-black tracking-wider bg-gradient-to-r from-[#fc8019] via-amber-500 to-yellow-400 bg-clip-text text-transparent drop-shadow-sm leading-tight">
+                        Foodiee
+                      </h1>
+                      
+                      {/* Address with Toggle Arrow */}
+                      <div className="flex items-center gap-1 mt-[-2px]">
+                        <p className="text-[10px] font-bold truncate text-gray-600 dark:text-gray-300">
+                          {address.street ? `${address.houseNo ? address.houseNo + ', ' : ''}${address.street}` : 'Select Address 📍'}
+                        </p>
+                        <span className={`text-[9px] text-gray-400 shrink-0 transition-transform duration-300 ${isAddressDropdownOpen ? 'rotate-180' : ''}`}>▼</span>
+                      </div>
+                    </div>
                   </button>
 
+                  {/* 🌟 Address Dropdown List (Blinkit / Zomato Style Popup) */}
+                  {isAddressDropdownOpen && (
+                    <div className={`absolute top-full left-0 mt-2 w-72 rounded-2xl shadow-2xl border p-3 z-50 backdrop-blur-xl ${darkMode ? 'bg-slate-900/95 border-slate-700 text-white' : 'bg-white/95 border-gray-200 text-slate-900'} animate-in fade-in slide-in-from-top-2 duration-200`}>
+                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-200 dark:border-slate-800">
+                        <span className="text-xs font-black text-[#fc8019]">Choose Delivery Address</span>
+                        <button 
+                          onClick={() => { setIsAddressDropdownOpen(false); setActiveTab('address'); }}
+                          className="text-[10px] font-bold text-amber-500 hover:underline"
+                        >
+                          + Add New
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {savedAddresses.length > 0 ? (
+                          savedAddresses.map((addr, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                setAddress(addr);
+                                localStorage.setItem('foodiee_active_address', JSON.stringify(addr));
+                                setIsAddressDropdownOpen(false);
+                                toast.success('📍 Delivery address updated!');
+                              }}
+                              className={`w-full text-left p-2 rounded-xl text-xs transition flex items-start gap-2 ${address.street === addr.street ? 'bg-orange-500/10 border border-orange-500/30 font-bold text-[#fc8019]' : 'hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-300'}`}
+                            >
+                              <span className="text-sm">📍</span>
+                              <div className="truncate">
+                                <p className="font-black uppercase text-[10px] text-amber-500">{addr.type || 'HOME'}</p>
+                                <p className="truncate text-[11px]">{addr.houseNo ? addr.houseNo + ', ' : ''}{addr.street}</p>
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="text-center py-3 text-xs text-gray-400">
+                            No saved addresses found. Click "+ Add New" to create one.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 💰 Wallet, Day/Night Toggle & Menu Icons (Right Side) */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  
+                  {/* Day / Night Mode Toggle */}
                   <button
                     onClick={() => setDarkMode(!darkMode)}
                     className={`px-2 py-1.5 rounded-xl text-[10px] font-black flex items-center gap-1 border shadow-sm transition ${darkMode ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-slate-900 text-amber-400 border-slate-800'}`}
@@ -1405,33 +2170,44 @@ export default function CustomerApp() {
                     <span>{darkMode ? 'Day' : 'Night'}</span>
                   </button>
 
-                  <button onClick={() => setActiveTab('wallet')} className="bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-full text-[10px] font-black text-[#fc8019] flex items-center gap-1 shadow-sm">
-                    <Wallet size={11} /> ₹{walletBalance.toFixed(2)}
+                  {/* Wallet Badge */}
+                  <button 
+                    onClick={() => setActiveTab('wallet')} 
+                    className="bg-orange-50 dark:bg-slate-800 border border-orange-200 dark:border-slate-700 px-2.5 py-1.5 rounded-full text-[11px] font-black text-[#fc8019] flex items-center gap-1 shadow-sm cursor-pointer"
+                  >
+                    <Wallet size={12} />
+                    <span>₹{walletBalance.toFixed(0)}</span>
                   </button>
-                  <button onClick={() => setIsDrawerOpen(true)} className="p-1.5 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-800 dark:text-gray-200">
+
+                  {/* Menu / Drawer Icon */}
+                  <button 
+                    onClick={() => setIsDrawerOpen(true)} 
+                    className="p-2 rounded-xl bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-200 cursor-pointer"
+                  >
                     <Menu size={16} />
                   </button>
+
                 </div>
               </div>
 
+              {/* 2. Search Bar */}
               <div className="relative">
-                <div className={`flex items-center px-3 py-2 rounded-2xl gap-2 border ${darkMode ? 'bg-slate-700/80 border-slate-600 text-white' : 'bg-gray-100 border-gray-200 text-gray-800'} focus-within:border-[#fc8019]`}>
-                  <Search size={13} className="text-gray-400 shrink-0" />
+                <div className={`flex items-center px-3.5 py-2.5 rounded-2xl gap-2 border ${darkMode ? 'bg-slate-800/90 border-slate-700 text-white' : 'bg-gray-100 border-gray-200 text-gray-800'} focus-within:border-[#fc8019]`}>
+                  <Search size={15} className="text-gray-400 shrink-0" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search dishes, groceries or address..."
+                    placeholder="Search 'biryani', 'groceries'..."
                     className="bg-transparent text-xs w-full outline-none font-bold placeholder:text-gray-400"
                   />
                   <button onClick={() => toast.success('🎤 Voice search listening...')} className="text-gray-400 hover:text-[#fc8019]">
-                    <Mic size={14} />
+                    <Mic size={15} />
                   </button>
                 </div>
               </div>
             </header>
 
-            {/* NOTIFICATIONS MODAL */}
             {showNotificationModal && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                 <div className={`${darkMode ? 'bg-slate-800 text-white' : 'bg-white text-gray-900'} w-full max-w-xs p-5 rounded-3xl shadow-2xl space-y-4 text-xs`}>
@@ -1459,17 +2235,16 @@ export default function CustomerApp() {
               </div>
             )}
 
-            {/* SIDE DRAWER */}
             {isDrawerOpen && (
               <div className="absolute inset-0 z-50 flex justify-end">
                 <div className={`${darkMode ? 'bg-slate-800 text-white' : 'bg-white text-gray-900'} w-64 h-full shadow-2xl p-4 flex flex-col justify-between space-y-4 animate-fadeIn`}>
-                  <div className="space-y-4">
+                  <div className="space-y-4 flex-1 overflow-y-auto">
                     <div className="flex justify-between items-center border-b border-gray-200 dark:border-slate-700 pb-3">
                       <div className="flex items-center gap-2">
                         <img src={userPhoto} alt="Profile" className="w-9 h-9 rounded-full border border-[#fc8019] object-cover" />
                         <div>
-                          <h3 className="text-xs font-black">{address.name}</h3>
-                          <p className="text-[10px] text-gray-400">{address.mobile}</p>
+                          <h3 className="text-xs font-black">{address.name || localStorage.getItem('userName') || 'User'}</h3>
+                          <p className="text-[10px] text-gray-400">{address.mobile || phone || localStorage.getItem('userMobile')}</p>
                         </div>
                       </div>
                       <button onClick={() => setIsDrawerOpen(false)} className="text-xs font-bold text-gray-400">✕</button>
@@ -1478,7 +2253,7 @@ export default function CustomerApp() {
                     <div className="space-y-1 text-xs font-bold">
                       <label className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer">
                         <Camera size={15} className="text-[#fc8019]" />
-                        <span>Upload photo to DB</span>
+                        <span>Upload photo</span>
                         <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
                       </label>
                       <button onClick={() => { setActiveTab('wallet'); setIsDrawerOpen(false); }} className="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2">
@@ -1491,10 +2266,13 @@ export default function CustomerApp() {
                         <Clock size={15} className="text-[#fc8019]" /> Order History
                       </button>
                       <button onClick={() => { setActiveTab('offers'); setIsDrawerOpen(false); }} className="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2">
-                        <Gift size={15} className="text-[#fc8019]" /> Offers & Rewards (* Scratch Cards)
+                        <Gift size={15} className="text-[#fc8019]" /> Offers & Rewards 
                       </button>
                       <button onClick={() => { setActiveTab('address'); setIsDrawerOpen(false); }} className="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2">
                         <MapPin size={15} className="text-[#fc8019]" /> Saved Address
+                      </button>
+                      <button onClick={() => { setActiveTab('profile'); setIsDrawerOpen(false); }} className="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2">
+                        <User size={15} className="text-[#fc8019]" /> Payment Details & Profile
                       </button>
                       <button onClick={() => { setIsSupportChatOpen(true); setIsDrawerOpen(false); }} className="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center gap-2">
                         <MessageCircle size={15} className="text-[#fc8019]" /> Live Support Chat
@@ -1502,24 +2280,37 @@ export default function CustomerApp() {
                     </div>
                   </div>
 
-                  <button 
-                    onClick={() => { 
-                      localStorage.removeItem('userMobile'); 
-                      localStorage.removeItem('userName'); 
-                      setIsLoggedIn(false); 
-                      setStep(1); 
-                      setOtpInput(''); 
-                    }} 
-                    className="w-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 py-4 rounded-2xl font-black text-xs shadow-lg flex items-center justify-center gap-2 transition cursor-pointer"
-                  >
-                    <LogOut size={16} /> Logout from Foodiee
-                  </button>
+                  <div className="pt-2 pb-6 shrink-0 border-t border-gray-200 dark:border-slate-700 mt-auto">
+    <button 
+      onClick={() => { 
+        localStorage.removeItem('userMobile'); 
+        localStorage.removeItem('userName'); 
+        localStorage.removeItem('foodiee_wallet_balance');
+        localStorage.removeItem('foodiee_payment_history');
+        localStorage.removeItem('foodiee_saved_scratch_cards');
+        localStorage.removeItem('foodiee_active_address');
+        localStorage.removeItem('foodiee_multiple_addresses');
+        localStorage.removeItem('foodiee_seen_promos');
+        
+        // 👇 యాప్ అన్‌ఇన్‌స్టాల్ లాజిక్ కోసం ఇది చాలా ముఖ్యం
+        localStorage.setItem('foodiee_app_installed', 'true');
+        
+        setIsLoggedIn(false); 
+        setPhone('');
+        setPassword('');
+        setIsDrawerOpen(false);
+        toast.success('✓ Logged out successfully');
+      }} 
+      className="w-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 py-3.5 rounded-2xl font-black text-xs shadow-lg flex items-center justify-center gap-2 transition cursor-pointer"
+    >
+      <LogOut size={12} /> Logout from Foodiee
+    </button>
+</div>
                 </div>
                 <div className="flex-1 bg-black/40" onClick={() => setIsDrawerOpen(false)}></div>
               </div>
             )}
 
-            {/* RATING MODAL */}
             {ratingModal && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <div className={`${darkMode ? 'bg-slate-800 text-white' : 'bg-white text-gray-900'} w-full max-w-xs p-4 rounded-3xl shadow-2xl space-y-3 text-xs`}>
@@ -1543,7 +2334,6 @@ export default function CustomerApp() {
               </div>
             )}
 
-            {/* ADD MONEY MODAL */}
             {isAddMoneyModalOpen && (
               <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
                 <div className="bg-slate-900 border border-amber-500/50 w-full max-w-sm rounded-3xl p-6 text-white space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
@@ -1570,36 +2360,52 @@ export default function CustomerApp() {
                     <span>💳 Pay Securely with Razorpay</span>
                   </button>
 
-                  <div className="space-y-2 pt-1 border-t border-slate-800">
-                    <p className="text-[10px] text-slate-400 uppercase font-bold">Or Pay Directly via Apps</p>
-                    <button onClick={() => handleUpiPayment('PhonePe', 'phonepe')} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-2.5 rounded-xl font-black text-xs shadow flex items-center justify-center gap-2">💜 Pay with PhonePe</button>
-                    <button onClick={() => handleUpiPayment('Google Pay', 'gpay')} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl font-black text-xs shadow flex items-center justify-center gap-2">💙 Pay with Google Pay (GPay)</button>
-                    <button onClick={() => handleUpiPayment('Paytm', 'paytm')} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2.5 rounded-xl font-black text-xs shadow flex items-center justify-center gap-2">🤍 Pay with Paytm</button>
-                  </div>
+                 <div className="space-y-3 pt-3 border-t border-slate-800 text-center">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Scan & Pay via Any UPI App (PhonePe / GPay / Paytm)</p>
+            
+            {addAmountInput && parseFloat(addAmountInput) > 0 ? (
+              <div className="bg-white p-4 rounded-3xl inline-block shadow-2xl mx-auto border-2 border-amber-500">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=upi://pay?pa=nommali52@ybl&pn=FoodieeApp&am=${addAmountInput}&cu=INR`} 
+                  alt="UPI QR Code" 
+                  className="w-44 h-44 mx-auto rounded-xl"
+                />
+                <div className="mt-2 space-y-0.5">
+                  <p className="text-xs font-black text-slate-950">Scan & pay</p>
+                  <p className="text-sm font-black text-emerald-600">Pay ₹{addAmountInput}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-800/60 p-4 rounded-2xl border border-slate-700">
+                <p className="text-xs text-slate-400 font-bold">ముందు పైన అమౌంట్ ఎంటర్ చేయండి, తరువాత ఆటోమేటిక్‌గా QR కోడ్ జనరేట్ అవుతుంది.</p>
+              </div>
+            )}
+          </div>
                 </div>
               </div>
             )}
 
-            {/* SUPPORT CHAT MODAL */}
             {isSupportChatOpen && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn">
-                <div className="bg-slate-900 border border-slate-700 w-full max-w-sm h-[500px] rounded-[32px] overflow-hidden flex flex-col shadow-2xl relative">
-                  <div className="bg-[#fc8019] p-4 text-slate-950 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">💬</span>
-                      <h3 className="font-black text-xs uppercase">Foodiee Customer Support</h3>
+                <div className="bg-slate-900 border border-slate-700 w-full max-w-sm h-[520px] rounded-[32px] overflow-hidden flex flex-col shadow-2xl relative">
+                  <div className="bg-[#075e54] p-4 text-white flex justify-between items-center shadow-md">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white font-black text-sm">💬</div>
+                      <div>
+                        <h3 className="font-black text-xs uppercase tracking-wide">Foodiee WhatsApp Support</h3>
+                        <p className="text-[9px] text-emerald-200">Online • Fast Response</p>
+                      </div>
                     </div>
-                    <button onClick={() => setIsSupportChatOpen(false)} className="text-slate-950 font-black cursor-pointer">✕</button>
+                    <button onClick={() => setIsSupportChatOpen(false)} className="text-white font-black cursor-pointer p-1">✕</button>
                   </div>
 
-                  <div className="flex-1 overflow-hidden bg-slate-950">
+                  <div className="flex-1 overflow-hidden bg-[#efeae2] dark:bg-slate-950">
                     <CustomerSupportChat userMobile={phone || localStorage.getItem('userMobile')} />
                   </div>
                 </div>
               </div>
             )}
 
-            {/* FLOATING SUPPORT CHAT BUTTON WITH UNREAD COUNT & BLINKING DOT[cite: 2] */}
             <div className="absolute bottom-20 right-4 z-40">
               <button 
                 onClick={() => {
@@ -1622,23 +2428,43 @@ export default function CustomerApp() {
               </button>
             </div>
 
-            {/* --- REAL-TIME ORDER CHAT MODAL --- */}
             {activeChatRecipient && activeTrackingOrder && (
-              <OrderChatModal 
-                orderId={activeTrackingOrder.orderId || activeTrackingOrder.id} 
-                userMobile={address.mobile || phone || localStorage.getItem('userMobile')} 
-                userRole="customer" 
-                recipientRole={activeChatRecipient} 
-                orderStatus={activeTrackingOrder.status}
-                onClose={() => setActiveChatRecipient(null)} 
-              />
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn">
+                <div className="bg-slate-900 border border-slate-700 w-full max-w-sm h-[520px] rounded-[32px] overflow-hidden flex flex-col shadow-2xl relative">
+                  <div className="bg-[#075e54] p-4 text-white flex justify-between items-center shadow-md">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white font-black text-sm">
+                        {activeChatRecipient === 'partner' ? '🛵' : '🏪'}
+                      </div>
+                      <div>
+                        <h3 className="font-black text-xs uppercase tracking-wide">
+                          {activeChatRecipient === 'partner' ? 'Delivery Partner Chat' : 'Shop Owner Chat'}
+                        </h3>
+                        <p className="text-[9px] text-emerald-200">WhatsApp Style Live Chat</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setActiveChatRecipient(null)} className="text-white font-black cursor-pointer p-1">✕</button>
+                  </div>
+
+                  <div className="flex-1 overflow-hidden bg-[#efeae2] dark:bg-slate-950">
+                    <OrderChatModal 
+                      orderId={activeTrackingOrder.orderId || activeTrackingOrder.id} 
+                      userMobile={address.mobile || phone || localStorage.getItem('userMobile')} 
+                      userRole="customer" 
+                      recipientRole={activeChatRecipient} 
+                      orderStatus={activeTrackingOrder.status}
+                      onClose={() => setActiveChatRecipient(null)} 
+                    />
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* MAIN CONTENT */}
-            <main className={`flex-1 overflow-y-auto p-4 space-y-4 pb-28 transition-colors duration-500 ${
-              selectedCategory === 'Food' ? (darkMode ? 'bg-amber-950/30' : 'bg-amber-50/80') :
-              selectedCategory === 'Grocery' ? (darkMode ? 'bg-emerald-950/30' : 'bg-emerald-50/80') :
-              selectedCategory === 'Meat & Fish' ? (darkMode ? 'bg-rose-950/30' : 'bg-rose-50/80') : ''
+            <main className={`flex-1 overflow-y-auto p-4 space-y-4 pb-28 transition-colors duration-500 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] ${
+              selectedCategory === 'Food' ? (darkMode ? 'bg-amber-950/40' : 'bg-amber-50/90') :
+              selectedCategory === 'Grocery' ? (darkMode ? 'bg-emerald-950/40' : 'bg-emerald-50/90') :
+              selectedCategory === 'Meat & Fish' ? (darkMode ? 'bg-rose-950/40' : 'bg-rose-50/90') : 
+              (darkMode ? 'bg-slate-900 text-white' : 'bg-gradient-to-br from-slate-50 via-gray-100 to-orange-50/40 text-gray-900')
             }`}>
 
               {successReceipt && (
@@ -1648,141 +2474,294 @@ export default function CustomerApp() {
                 </div>
               )}
 
-              {/* LIVE TRACKING VIEW */}
-              {activeTrackingOrder ? (
-                (() => {
-                  const shopLat = activeTrackingOrder.shopLat || activeTrackingOrder.shop_lat || 18.5793;
-                  const shopLng = activeTrackingOrder.shopLng || activeTrackingOrder.shop_lng || 84.4452;
-                  const customerLat = activeTrackingOrder.customerLat || activeTrackingOrder.customer_lat || address.latitude || 18.5850;
-                  const customerLng = activeTrackingOrder.customerLng || activeTrackingOrder.customer_lng || address.longitude || 84.4520;
+             {searchQuery.trim() !== '' && (
+  <div className="space-y-4 animate-fadeIn">
+    <div className="flex justify-between items-center px-1">
+      <h3 className="text-xs font-black uppercase tracking-wider text-amber-400">
+        Search Results for "{searchQuery}"
+      </h3>
+      <button onClick={() => setSearchQuery('')} className="text-[10px] text-rose-400 font-bold underline cursor-pointer">
+        Clear Search ❌
+      </button>
+    </div>
 
-                  return (
-                    <div className="space-y-3 pb-6 animate-fadeIn">
-                      <button onClick={() => setActiveTrackingOrder(null)} className="text-xs font-bold text-gray-400 flex items-center gap-1 hover:text-white transition">
-                        <ArrowLeft size={14} /> Back to Dashboard
-                      </button>
+    {/* 1. Matching Stores / Shops */}
+    <div className="space-y-2">
+      <p className="text-[10px] font-black text-slate-400 uppercase">Matching Stores ({dynamicShops.length})</p>
+      {dynamicShops.length === 0 ? (
+        <div className="text-center py-8 bg-slate-900/60 rounded-2xl border border-slate-800">
+          <p className="text-xs text-slate-400 font-bold">No shops found matching "{searchQuery}".</p>
+        </div>
+      ) : (
+        dynamicShops.map(shop => (
+          <div 
+            key={shop.id} 
+            onClick={() => { setSelectedCategory(shop.category || 'Food'); setSelectedShop(shop); setSearchQuery(''); }} 
+            className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between gap-3 shadow-lg cursor-pointer hover:border-amber-500/50 transition"
+          >
+            <img src={shop.imageUrl} alt={shop.name} className="w-12 h-12 rounded-xl object-cover border border-slate-700" />
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs font-black text-white truncate">{shop.name}</h4>
+              <p className="text-[10px] text-slate-400">{shop.category} • ⚡ {shop.time}</p>
+            </div>
+            <ChevronRight size={16} className="text-amber-400 shrink-0" />
+          </div>
+        ))
+      )}
+    </div>
 
-                      <div className="bg-slate-900 border border-amber-500/30 backdrop-blur-md text-white rounded-[32px] overflow-hidden shadow-2xl space-y-4">
-                        <div className="p-4 pb-2 flex justify-between items-center border-b border-slate-800">
-                          <div>
-                            <span className="bg-[#fc8019]/20 text-[#fc8019] text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">Live Tracking</span>
-                            <h3 className="text-sm font-black mt-1 text-white">Order from {activeTrackingOrder.shopName || activeTrackingOrder.shop}</h3>
-                            <p className="text-[10px] text-slate-400">Order ID: {activeTrackingOrder.orderId || activeTrackingOrder.id}</p>
-                          </div>
-                        </div>
+    {/* 2. Matching Food / Grocery Items (Dishes) */}
+    <div className="space-y-2 pt-2">
+      <p className="text-[10px] font-black text-slate-400 uppercase">Matching Dishes & Items</p>
+      {(() => {
+        const matchingItems = backendFoodItems.filter(item => 
+          (item.itemName || item.name || '').toLowerCase().includes(searchQuery.toLowerCase())
+        );
 
-                        <div className="w-full h-56 relative border-y border-slate-800">
-                          <MapContainer center={[riderLocation.lat, riderLocation.lng]} zoom={15} zoomControl={false} className="w-full h-full z-10">
-                            <MapUpdater center={[riderLocation.lat, riderLocation.lng]} />
-                            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                            
-                            <Polyline 
-                              positions={[[riderLocation.lat, riderLocation.lng], [shopLat, shopLng]]} 
-                              color="#fc8019" 
-                              weight={4} 
-                              dashArray="5, 5" 
-                            />
+        if (matchingItems.length === 0) {
+          return (
+            <div className="text-center py-8 bg-slate-900/60 rounded-2xl border border-slate-800">
+              <p className="text-xs text-slate-400 font-bold">No dishes or items found matching "{searchQuery}".</p>
+            </div>
+          );
+        }
 
-                            <Polyline 
-                              positions={[[shopLat, shopLng], [customerLat, customerLng]]} 
-                              color="#3b82f6" 
-                              weight={5} 
-                            />
+        return matchingItems.map((item, idx) => {
+          const itemName = item.itemName || item.name || 'Item';
+          const itemPrice = item.price || 0;
+          const itemImage = item.imageUrl && item.imageUrl.trim() !== '' ? item.imageUrl : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c';
+          const cartItem = cart.find(c => c.id === (item.id || idx));
 
-                            <Marker 
-                              position={[riderLocation.lat, riderLocation.lng]} 
-                              icon={getAnimatedBikeIcon(0)} 
-                            />
-                          </MapContainer>
-                          
-                          <div className="absolute top-4 right-4 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-2xl text-center border border-emerald-400/40 backdrop-blur-md animate-pulse z-20">
-                            <p className="text-lg font-black leading-none">12</p>
-                            <p className="text-[9px] font-bold uppercase tracking-wider opacity-90 mt-0.5">Mins</p>
-                          </div>
+          return (
+            <div key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex items-center justify-between gap-3 shadow-lg">
+              <img src={itemImage} alt={itemName} className="w-12 h-12 rounded-xl object-cover border border-slate-700" />
+              <div className="flex-1 min-w-0">
+                <h4 className="text-xs font-black text-white truncate">{itemName}</h4>
+                <p className="text-xs font-black text-[#fc8019]">₹{itemPrice}</p>
 
-                          <div className="absolute top-4 left-4 bg-slate-950/90 backdrop-blur-md border border-amber-500/30 px-3 py-2 rounded-2xl shadow-xl flex items-center gap-2 z-20">
-                            <span className="text-base animate-bounce">🛵</span>
-                            <div>
-                              <p className="text-[11px] font-black text-white">Rider is on the way</p>
-                              <p className="text-[9px] text-emerald-400 font-bold">{activeTrackingOrder.status || 'Out for delivery 🛵'}</p>
-                            </div>
-                          </div>
-                        </div>
+                {/* 🌟 ఐటెమ్ డిస్క్రిప్షన్ ఇక్కడ కస్టమర్‌కి కనిపిస్తుంది */}
+                 {item.description && (
+               <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+              {item.description}
+                </p>
+                )}
+              </div>
 
-                        <div className="px-4 space-y-3">
-                          <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-emerald-500/30 space-y-1">
-                            <h4 className="text-xs font-black text-white uppercase tracking-wider">Current Status</h4>
-                            <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold animate-pulse">
-                              ● {activeTrackingOrder.status || 'Out for delivery 🛵'}
-                            </span>
-                          </div>
+              {cartItem ? (
+                <div className="flex items-center bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 rounded-xl px-3 py-1.5 gap-2 font-black shrink-0 text-xs shadow-md">
+                  <button onClick={() => setCart(cart.map(c => c.id === (item.id || idx) ? {...c, qty: c.qty - 1} : c).filter(c => c.qty > 0))}><Minus size={13}/></button>
+                  <span>{cartItem.qty}</span>
+                  <button onClick={() => setCart(cart.map(c => c.id === (item.id || idx) ? {...c, qty: c.qty + 1} : c))}><Plus size={13}/></button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => {
+                    setCart([...cart, { id: item.id || idx, name: itemName, price: itemPrice, qty: 1 }]);
+                    toast.success(`✓ Added ${itemName} to cart!`);
+                  }}
+                  className="bg-[#fc8019] text-slate-950 px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer hover:bg-amber-400 transition"
+                >
+                  ADD +
+                </button>
+              )}
+            </div>
+          );
+        });
+      })()}
+    </div>
+  </div>
+)}
 
-                          {((activeTrackingOrder.status || '').toLowerCase().includes('out for delivery') || activeTrackingOrder.deliveryOtp || activeTrackingOrder.delivery_otp) && (
-                            <div className="bg-amber-500/20 border-2 border-amber-500 px-3 py-2.5 rounded-2xl text-center">
-                              <p className="text-[10px] text-amber-300 font-black uppercase tracking-wider">Delivery OTP for Partner</p>
-                              <h3 className="text-xl font-black text-amber-400 tracking-[0.2em] mt-0.5">
-                                {activeTrackingOrder.deliveryOtp || activeTrackingOrder.delivery_otp || '----'}
-                              </h3>
-                            </div>
-                          )}
+        {activeTrackingOrder ? (
+  (() => {
+    const shopLat = activeTrackingOrder.shopLat || activeTrackingOrder.shop_lat || 18.5793;
+    const shopLng = activeTrackingOrder.shopLng || activeTrackingOrder.shop_lng || 84.4452;
+    const customerLat = activeTrackingOrder.customerLat || activeTrackingOrder.customer_lat || address.latitude || 18.5850;
+    const customerLng = activeTrackingOrder.customerLng || activeTrackingOrder.customer_lng || address.longitude || 84.4520;
 
-                          {/* --- CHAT BUTTONS FOR CUSTOMER --- */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <button 
-                              onClick={() => { setActiveChatRecipient('partner'); setUnreadOrderCount(0); }} 
-                              className="bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow relative"
-                            >
-                              <Bike size={14} /> Chat with Delivery
-                              {unreadOrderCount > 0 && (
-                                <span className="absolute -top-1 -right-1 bg-red-600 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
-                                  {unreadOrderCount}
-                                </span>
-                              )}
-                            </button>
+    // Map bounds automatic ga set chese helper component
+    function MapBoundsUpdater({ shopLat, shopLng, customerLat, customerLng }) {
+      const map = useMap();
+      useEffect(() => {
+        if (shopLat && shopLng && customerLat && customerLng) {
+          const bounds = L.latLngBounds(
+            [shopLat, shopLng],
+            [customerLat, customerLng]
+          );
+          map.fitBounds(bounds, { padding: [50, 50] });
+        }
+      }, [shopLat, shopLng, customerLat, customerLng, map]);
+      return null;
+    }
 
-                            <button 
-                              onClick={() => { setActiveChatRecipient('shop'); setUnreadOrderCount(0); }} 
-                              className="bg-[#fc8019] hover:bg-[#e07015] text-slate-950 py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer shadow relative"
-                            >
-                              <Store size={14} /> Chat with Shop
-                            </button>
-                          </div>
+    return (
+      <div className="space-y-4 pb-6 animate-fadeIn">
+        <button onClick={() => setActiveTrackingOrder(null)} className="text-xs font-bold text-gray-400 flex items-center gap-1 hover:text-white transition cursor-pointer">
+          <ArrowLeft size={14} /> Back to Dashboard
+        </button>
 
-                          <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-base font-black text-amber-400">
-                                <Store size={18} />
-                              </div>
-                              <div>
-                                <h4 className="text-xs font-black text-white">{activeTrackingOrder.shopName || activeTrackingOrder.shop}</h4>
-                                <p className="text-[9px] text-slate-400">Shop Owner</p>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => toast.success(`📞 Calling shop...`)} className="w-9 h-9 rounded-full bg-emerald-600/20 text-emerald-400 flex items-center justify-center shadow"><Phone size={15} /></button>
-                            </div>
-                          </div>
+        <div className="bg-slate-900 border border-amber-500/30 backdrop-blur-md text-white rounded-[32px] overflow-hidden shadow-2xl space-y-4 p-4">
+          
+          <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+            <div>
+              <span className="bg-[#fc8019]/20 text-[#fc8019] text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">Live Tracking</span>
+              <h3 className="text-sm font-black mt-1 text-white">Order from {activeTrackingOrder.shopName || activeTrackingOrder.shop}</h3>
+              <p className="text-[10px] text-slate-400">Order ID: {activeTrackingOrder.orderId || activeTrackingOrder.id}</p>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-black text-emerald-400 bg-emerald-500/20 px-2.5 py-1 rounded-full">
+                {(() => {
+                  const R = 6371; 
+                  const dLat = (customerLat - shopLat) * (Math.PI / 180);
+                  const dLon = (customerLng - shopLng) * (Math.PI / 180);
+                  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(shopLat * (Math.PI / 180)) * Math.cos(customerLat * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                  const distanceKm = R * c;
+                  return distanceKm < 1 ? `${Math.round(distanceKm * 1000)} meters` : `${distanceKm.toFixed(1)} km`;
+                })()}
+              </span>
+            </div>
+          </div>
 
-                          <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-base font-black text-amber-400">👨‍✈️</div>
-                              <div>
-                                <h4 className="text-xs font-black text-white">Bommali Naveen</h4>
-                                <p className="text-[9px] text-slate-400">Delivery Partner (AP 30 BIKE 1234)</p>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => toast.success(`📞 Calling delivery partner...`)} className="w-9 h-9 rounded-full bg-emerald-600/20 text-emerald-400 flex items-center justify-center shadow"><Phone size={15} /></button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
-              ) : isPaymentScreen ? (
-                <div className="space-y-3">
-                  <button onClick={() => setIsPaymentScreen(false)} className="text-xs font-bold text-gray-500 flex items-center gap-1">
+          {/* Swiggy / Zomato Style Clean Map Container with Bounds & Markers */}
+          <div className="w-full h-64 relative rounded-3xl overflow-hidden border-2 border-slate-700 shadow-2xl">
+            <MapContainer center={[shopLat, shopLng]} zoom={14} zoomControl={false} className="w-full h-full z-10">
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              
+              <Marker 
+                position={[shopLat, shopLng]} 
+                icon={L.divIcon({
+                  className: 'custom-shop-marker',
+                  html: `<div style="background: #1e293b; border: 2px solid #fc8019; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.4);"><span style="font-size: 16px;">🏪</span></div>`,
+                  iconSize: [36, 36],
+                  iconAnchor: [18, 18]
+                })}
+              />
+
+              <Marker 
+                position={[customerLat, customerLng]} 
+                icon={L.divIcon({
+                  className: 'custom-customer-marker',
+                  html: `<div style="background: #1e293b; border: 2px solid #10b981; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.4);"><span style="font-size: 16px;">🏠</span></div>`,
+                  iconSize: [36, 36],
+                  iconAnchor: [18, 18]
+                })}
+              />
+
+              <Marker 
+                position={[deliveryBoyCoords.lat, deliveryBoyCoords.lng]} 
+                icon={getAnimatedBikeIcon(0)}
+              />
+
+              <Polyline 
+                positions={[
+                  [shopLat, shopLng], 
+                  [(shopLat + customerLat) / 2 + 0.002, (shopLng + customerLng) / 2 - 0.002],
+                  [customerLat, customerLng]
+                ]} 
+                color="#fc8019" 
+                weight={6} 
+                opacity={0.9}
+              />
+
+              {/* Automatic Bounds Updater to show both points */}
+              <MapBoundsUpdater shopLat={shopLat} shopLng={shopLng} customerLat={customerLat} customerLng={customerLng} />
+            </MapContainer>
+
+            <div className="absolute top-3 right-3 bg-emerald-600 text-white px-3.5 py-2 rounded-2xl shadow-2xl text-center border border-emerald-400/40 backdrop-blur-md z-20">
+              <p className="text-sm font-black leading-none">12</p>
+              <p className="text-[8px] font-bold uppercase tracking-wider opacity-90 mt-0.5">Mins</p>
+            </div>
+
+            <div className="absolute top-3 left-3 bg-slate-950/90 backdrop-blur-md border border-amber-500/30 px-3 py-1.5 rounded-2xl shadow-xl flex items-center gap-2 z-20">
+              <span className="text-sm animate-bounce">🛵</span>
+              <div>
+                <p className="text-[10px] font-black text-white">Rider is on the way</p>
+                <p className="text-[8px] text-emerald-400 font-bold">{activeTrackingOrder.status || 'Out for delivery'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-emerald-500/30 space-y-1">
+              <h4 className="text-xs font-black text-white uppercase tracking-wider">Current Status</h4>
+              <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full text-[11px] font-bold animate-pulse">
+                ● {activeTrackingOrder.status || 'Out for delivery 🛵'}
+              </span>
+            </div>
+
+            <div className="bg-amber-500/10 border-2 border-amber-500/40 p-4 rounded-2xl text-center space-y-2">
+              <p className="text-amber-400 font-black uppercase tracking-wider text-[11px]">🔑 Secure Delivery OTP (Sent to WhatsApp)</p>
+              <h3 className="text-2xl font-black text-white tracking-[0.2em]">
+                {activeTrackingOrder.deliveryOtp || activeTrackingOrder.delivery_otp || '4829'}
+              </h3>
+              <p className="text-[10px] text-slate-400">
+                ఫుడ్ అందిన తర్వాతే డెలివరీ బాయ్‌కి ఈ OTP చెప్పండి.
+              </p>
+              <a 
+                href={`https://api.whatsapp.com/send?phone=91${activeTrackingOrder.customerMobile || address.mobile || phone}&text=Hello, your Foodiee Order #${activeTrackingOrder.orderId || activeTrackingOrder.id} Delivery OTP is ${activeTrackingOrder.deliveryOtp || activeTrackingOrder.delivery_otp || '4829'}`} 
+                target="_blank" 
+                rel="noreferrer"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow cursor-pointer mt-2"
+              >
+                <span>💬 Resend WhatsApp OTP</span>
+              </a>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => { setActiveChatRecipient('partner'); setUnreadOrderCount(0); }} 
+                className="bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow relative"
+              >
+                <Bike size={14} /> WhatsApp Chat (Rider)
+                {unreadOrderCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
+                    {unreadOrderCount}
+                  </span>
+                )}
+              </button>
+
+              <button 
+                onClick={() => { setActiveChatRecipient('shop'); setUnreadOrderCount(0); }} 
+                className="bg-[#075e54] hover:bg-[#054c44] text-white py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer shadow relative"
+              >
+                <Store size={14} /> WhatsApp Chat (Shop)
+              </button>
+            </div>
+
+            {/* Shop Owner & Delivery Partner Call Cards */}
+            <div className="space-y-3 pt-2">
+              
+              {/* Delivery Partner Call Card */}
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-base font-black text-amber-400">👨‍✈️</div>
+                  <div>
+                    <h4 className="text-xs font-black text-white">
+                      {activeTrackingOrder.deliveryPartnerName || activeTrackingOrder.deliveryBoyName || activeTrackingOrder.driverName || 'Delivery Partner'}
+                    </h4>
+                    <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                      Mobile: <span className="text-emerald-400">{activeTrackingOrder.deliveryPartnerMobile || activeTrackingOrder.deliveryBoyMobile || activeTrackingOrder.driverMobile || activeTrackingOrder.deliveryMobile || 'Not Assigned'}</span>
+                    </p>
+                  </div>
+                </div>
+                <a 
+                  href={`tel:${activeTrackingOrder.deliveryPartnerMobile || activeTrackingOrder.deliveryBoyMobile || activeTrackingOrder.driverMobile || activeTrackingOrder.deliveryMobile || ''}`} 
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow cursor-pointer transition"
+                >
+                  <Phone size={14} /> Call
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
+  })()
+) : isPaymentScreen ? (
+  <div className="space-y-3">
+  <button onClick={() => setIsPaymentScreen(false)} className="text-xs font-bold text-gray-500 flex items-center gap-1">
                     <ArrowLeft size={13} /> Back
                   </button>
 
@@ -1796,68 +2775,139 @@ export default function CustomerApp() {
 
                     {!isEditingAddress ? (
                       <div className="space-y-0.5">
-                        <p className="text-xs font-bold">{address.name} ({address.mobile})</p>
-                        <p className="text-[11px] text-gray-400">
-                          {address.houseNo ? `${address.houseNo}, ` : ''}{address.street}, {address.landmark ? `Near ${address.landmark}, ` : ''}{address.district}, {address.state} - {address.pincode}
-                        </p>
+                        {address.street ? (
+                          <>
+                            <p className="text-xs font-bold">{address.name || localStorage.getItem('userName')} ({address.mobile || phone})</p>
+                            <p className="text-[11px] text-gray-400">
+                              {address.houseNo ? `${address.houseNo}, ` : ''}{address.street}, {address.landmark ? `Near ${address.landmark}, ` : ''}{address.district}, {address.state} - {address.pincode}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-xs text-orange-400 font-bold">⚠️ No delivery address set. Click 'Edit / GPS 📍' to add one.</p>
+                        )}
                       </div>
-                    ) : (
-                      <form onSubmit={handleSaveEditedAddress} className="space-y-2 pt-1 border-t border-slate-700 text-xs">
-                        <div className="flex gap-2">
-                          <button type="button" onClick={detectLiveGpsLocation} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-[10px] font-black flex items-center justify-center gap-1 shadow cursor-pointer">
-                            <Navigation size={12} /> Detect Live GPS Coordinates
-                          </button>
-                        </div>
-                        <div>
-                          <label className="text-[9px] text-slate-400 font-bold uppercase">Customer Name</label>
-                          <input type="text" value={editableAddress.name || ''} onChange={(e) => setEditableAddress({...editableAddress, name: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
-                        </div>
-                        <div>
-                          <label className="text-[9px] text-slate-400 font-bold uppercase">Flat/House No</label>
-                          <input type="text" value={editableAddress.houseNo || ''} onChange={(e) => setEditableAddress({...editableAddress, houseNo: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" />
-                        </div>
-                        <div>
-                          <label className="text-[9px] text-slate-400 font-bold uppercase">Apartment / Area</label>
-                          <input type="text" value={editableAddress.street} onChange={(e) => setEditableAddress({...editableAddress, street: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
-                        </div>
-                        <div>
-                          <label className="text-[9px] text-slate-400 font-bold uppercase">Landmark</label>
-                          <input type="text" value={editableAddress.landmark || ''} onChange={(e) => setEditableAddress({...editableAddress, landmark: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" />
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="flex-1">
-                            <label className="text-[9px] text-slate-400 font-bold uppercase">District</label>
-                            <input type="text" value={editableAddress.district} onChange={(e) => setEditableAddress({...editableAddress, district: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
-                          </div>
-                          <div className="w-24">
-                            <label className="text-[9px] text-slate-400 font-bold uppercase">Pincode</label>
-                            <input type="text" value={editableAddress.pincode} onChange={(e) => setEditableAddress({...editableAddress, pincode: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
-                          </div>
-                        </div>
-                        <button type="submit" className="w-full bg-[#fc8019] text-slate-950 py-2 rounded-xl font-black text-xs shadow cursor-pointer">Save Address & Name</button>
-                      </form>
+                   ) : (
+                     <form onSubmit={handleSaveEditedAddress} className="space-y-2.5 pt-1 border-t border-slate-700 text-xs">
+  
+  {/* 👇 పిన్ కోడ్ లేదా ఏరియా పేరు టైప్ చేసి సెర్చ్ చేసే బాక్స్ */}
+  <div className="space-y-1 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+    <label className="text-[9px] text-amber-400 font-bold uppercase">Search by Pincode or Area Name</label>
+    <div className="flex gap-2">
+      <input 
+        type="text" 
+        id="searchAreaInput"
+        placeholder="ఉదా: 532312 లేదా Ichapuram" 
+        className="flex-1 bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none"
+      />
+      <button 
+        type="button" 
+        onClick={() => {
+          const val = document.getElementById('searchAreaInput').value;
+          handleSearchLocationByText(val);
+        }}
+        className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-2 rounded-xl text-xs font-black cursor-pointer shadow"
+      >
+        Search 🔍
+      </button>
+    </div>
+  </div>
+
+  <div className="flex gap-2">
+    <button type="button" onClick={detectLiveGpsLocation} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-[10px] font-black flex items-center justify-center gap-1 shadow cursor-pointer">
+      <Navigation size={12} /> Detect Live GPS
+    </button>
+  </div>
+
+  <div>
+    <label className="text-[9px] text-slate-400 font-bold uppercase">Customer Name</label>
+    <input type="text" value={editableAddress.name || ''} onChange={(e) => setEditableAddress({...editableAddress, name: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
+  </div>
+
+  <div>
+    <label className="text-[9px] text-slate-400 font-bold uppercase">Flat/House No</label>
+    <input type="text" value={editableAddress.houseNo || ''} onChange={(e) => setEditableAddress({...editableAddress, houseNo: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" />
+  </div>
+
+  <div>
+    <label className="text-[9px] text-slate-400 font-bold uppercase">Apartment / Area / Street</label>
+    <input type="text" value={editableAddress.street || ''} onChange={(e) => setEditableAddress({...editableAddress, street: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
+  </div>
+
+  <div>
+    <label className="text-[9px] text-slate-400 font-bold uppercase">Landmark</label>
+    <input type="text" value={editableAddress.landmark || ''} onChange={(e) => setEditableAddress({...editableAddress, landmark: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" />
+  </div>
+
+  <div className="flex gap-2">
+    <div className="flex-1">
+      <label className="text-[9px] text-slate-400 font-bold uppercase">District</label>
+      <input type="text" value={editableAddress.district || ''} onChange={(e) => setEditableAddress({...editableAddress, district: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
+    </div>
+    <div className="w-24">
+      <label className="text-[9px] text-slate-400 font-bold uppercase">Pincode</label>
+      <input type="text" value={editableAddress.pincode || ''} onChange={(e) => setEditableAddress({...editableAddress, pincode: e.target.value})} className="w-full bg-slate-900 border border-slate-700 p-2 rounded-xl text-xs font-bold text-white outline-none mt-0.5" required />
+    </div>
+  </div>
+
+  {/* 👇 మ్యాన్యువల్‌గా లేదా సెర్చ్ ద్వారా వచ్చే లాటిట్యూడ్ మరియు లాంగిట్యూడ్ */}
+  <div className="flex gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+    <div className="flex-1">
+      <label className="text-[9px] text-amber-400 font-bold uppercase">Latitude (Lat)</label>
+      <input type="number" step="any" value={editableAddress.latitude || ''} onChange={(e) => setEditableAddress({...editableAddress, latitude: parseFloat(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs font-bold text-amber-300 outline-none mt-0.5" placeholder="18.5793" />
+    </div>
+    <div className="flex-1">
+      <label className="text-[9px] text-amber-400 font-bold uppercase">Longitude (Lng)</label>
+      <input type="number" step="any" value={editableAddress.longitude || ''} onChange={(e) => setEditableAddress({...editableAddress, longitude: parseFloat(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 p-1.5 rounded-lg text-xs font-bold text-amber-300 outline-none mt-0.5" placeholder="84.4452" />
+    </div>
+  </div>
+
+  <button type="submit" className="w-full bg-[#fc8019] text-slate-950 py-2.5 rounded-xl font-black text-xs shadow cursor-pointer mt-1">Save Address & GPS</button>
+</form>
+                    
                     )}
                   </div>
 
-                  <div className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} p-3 rounded-2xl border shadow-sm space-y-2 text-xs`}>
+                  <div className={`${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'} p-3 rounded-2xl border shadow-sm space-y-2 text-xs`}>
                     <div className="flex justify-between items-center">
-                      <span className="font-extrabold text-gray-400 uppercase flex items-center gap-1"><Users size={13} /> Split Bill</span>
+                      <span className="font-extrabold text-gray-400 uppercase flex items-center gap-1">
+                        <Users size={13} /> Split Bill
+                      </span>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => setSplitPeople(Math.max(1, splitPeople - 1))} className="border px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-700 font-bold">-</button>
-                        <span className="font-black">{splitPeople} People</span>
-                        <button onClick={() => setSplitPeople(splitPeople + 1)} className="border px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-700 font-bold">+</button>
+                        <button 
+                          onClick={() => setSplitPeople(Math.max(1, splitPeople - 1))} 
+                          className="w-7 h-7 flex items-center justify-center border rounded-lg bg-slate-200 dark:bg-slate-700 text-gray-900 dark:text-white font-black hover:bg-slate-300 dark:hover:bg-slate-600 transition cursor-pointer"
+                        >
+                          -
+                        </button>
+                        <span className="font-black text-gray-900 dark:text-white px-1">{splitPeople} People</span>
+                        <button 
+                          onClick={() => setSplitPeople(splitPeople + 1)} 
+                          className="w-7 h-7 flex items-center justify-center border rounded-lg bg-slate-200 dark:bg-slate-700 text-gray-900 dark:text-white font-black hover:bg-slate-300 dark:hover:bg-slate-600 transition cursor-pointer"
+                        >
+                          +
+                        </button>
                       </div>
                     </div>
                     {splitPeople > 1 && (
-                      <p className="text-emerald-600 font-bold text-[11px]">Each pays: ₹{splitAmount}</p>
+                      <p className="text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
+                        Each pays: ₹{splitAmount}
+                      </p>
                     )}
                   </div>
 
-                  <div className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} p-3 rounded-2xl border shadow-sm space-y-2 text-xs`}>
+                  <div className={`${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'} p-3 rounded-2xl border shadow-sm space-y-2 text-xs`}>
                     <span className="font-extrabold text-gray-400 uppercase">Tip Rider 🛵</span>
                     <div className="grid grid-cols-4 gap-2">
                       {[0, 10, 20, 50].map((t) => (
-                        <button key={t} onClick={() => setRiderTip(t)} className={`p-2 rounded-xl font-bold border ${riderTip === t ? 'bg-[#fc8019] text-white border-[#fc8019]' : 'bg-gray-50 dark:bg-slate-700 border-gray-200'}`}>
+                        <button 
+                          key={t} 
+                          onClick={() => setRiderTip(t)} 
+                          className={`p-2 rounded-xl font-bold border transition cursor-pointer ${
+                            riderTip === t 
+                              ? 'bg-[#fc8019] text-white border-[#fc8019]' 
+                              : 'bg-gray-50 dark:bg-slate-700 border-gray-200 dark:border-slate-600 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-slate-600'
+                          }`}
+                        >
                           {t === 0 ? 'None' : `₹${t}`}
                         </button>
                       ))}
@@ -1866,38 +2916,68 @@ export default function CustomerApp() {
 
                   <div className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} p-3 rounded-2xl border shadow-sm space-y-2.5`}>
                     <span className="text-[9px] font-extrabold text-gray-400 uppercase">Items</span>
-                    <div className="space-y-1.5 border-b border-gray-100 dark:border-slate-700 pb-2.5">
-                      {cart.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-xs">
-                          <span>{item.qty}x {item.name}</span>
-                          <span className="font-bold">₹{item.price * item.qty}</span>
-                        </div>
-                      ))}
-                    </div>
+                      <div className="space-y-2 border-b border-gray-100 dark:border-slate-700 pb-2.5">
+  {cart.map((item, idx) => (
+    <div key={idx} className="flex justify-between items-center text-xs gap-2">
+      <span className="flex-1 truncate font-bold">{item.name}</span>
+      
+      {/* Plus and Minus buttons for each item */}
+      <div className="flex items-center bg-[#fc8019] text-slate-950 rounded-lg px-2 py-0.5 gap-1.5 font-black shrink-0 text-xs shadow">
+        <button onClick={() => setCart(cart.map(c => c.id === item.id ? {...c, qty: c.qty - 1} : c).filter(c => c.qty > 0))}>
+          <Minus size={11} />
+        </button>
+        <span>{item.qty}</span>
+        <button onClick={() => setCart(cart.map(c => c.id === item.id ? {...c, qty: c.qty + 1} : c))}>
+          <Plus size={11} />
+        </button>
+      </div>
+
+      <span className="font-bold w-12 text-right">₹{item.price * item.qty}</span>
+    </div>
+  ))}
+</div>
 
                     <div className="space-y-1 text-xs text-gray-400">
-                      <div className="flex justify-between">
-                        <span>Total</span>
-                        <span className="font-bold">₹{subtotal}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Delivery</span>
-                        <span className="font-bold">₹{deliveryFee}</span>
-                      </div>
-                      {discount > 0 && (
-                        <div className="flex justify-between text-emerald-600 font-bold">
-                          <span>Discount</span>
-                          <span>-₹{discount}</span>
-                        </div>
-                      )}
-                      <div className="pt-2 border-t border-dashed flex justify-between items-center text-xs font-black">
-                        <span>To Pay</span>
-                        <span className="text-[#fc8019] text-sm">₹{totalAmount}</span>
-                      </div>
-                    </div>
+  <div className="flex justify-between">
+    <span>Total</span>
+    <span className="font-bold">₹{subtotal}</span>
+  </div>
+
+  {/* 👇 డెలివరీ ఫీజు మరియు దూరం (Distance) చూపించే కోడ్ */}
+  <div className="flex justify-between items-center">
+    <span className="flex items-center gap-1.5">
+      <span>Delivery Fee</span>
+      <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+        ({(() => {
+          const R = 6371; 
+          const dLat = (custLat - shopLat) * (Math.PI / 180);
+          const dLon = (custLng - shopLng) * (Math.PI / 180);
+          const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(shopLat * (Math.PI / 180)) * Math.cos(custLat * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const distanceKm = R * c;
+          return distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`;
+        })()})
+      </span>
+    </span>
+    <span className="font-bold">
+      {deliveryFee === 0 ? <span className="text-emerald-500 font-black">FREE (1st Order)</span> : `₹${deliveryFee}`}
+    </span>
+  </div>
+
+  {discount > 0 && (
+    <div className="flex justify-between items-center text-emerald-600 font-bold">
+      <span>Discount {promoCode && `(${promoCode.toUpperCase()})`}</span>
+      <span>-₹{discount}</span>
+    </div>
+  )}
+
+  <div className="pt-2 border-t border-dashed flex justify-between items-center text-xs font-black">
+    <span>To Pay</span>
+    <span className="text-[#fc8019] text-sm">₹{totalAmount}</span>
+  </div>
+</div>
                   </div>
 
-                  {/* AVAILABLE PROMO CODES SECTION */}
                   <div className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} p-3 rounded-2xl border shadow-sm space-y-2 text-xs`}>
                     <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-wider">Available Promo Codes</span>
                     
@@ -1938,14 +3018,77 @@ export default function CustomerApp() {
                     {[
                       { name: `foodiee Wallet`, icon: '💰' },
                       { name: 'Razorpay Online', icon: '⚡' },
-                      { name: 'COD', icon: '💵' }
+                      { name: 'COD', icon: '💵' },
+                      { name: 'PhonePe UPI', icon: '📱' },
+                      { name: 'Google Pay (GPay)', icon: '🌐' }
                     ].map((method, idx) => (
-                      <button key={idx} onClick={() => handlePayment(method.name)} className={`w-full border p-2.5 rounded-xl text-xs font-bold flex justify-between items-center ${darkMode ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                      <button 
+                        key={idx} 
+                        onClick={() => {
+                          const upiId = "nbommali52@ybl";
+                          const merchantName = "FoodieeApp";
+                          const finalAmount = totalAmount.toFixed(2);
+
+                          if (method.name === 'PhonePe UPI') {
+                            // 🌟 ఫోన్ పే రియల్ యాప్ ఇంటెంట్ లింక్
+                            const phonePeUrl = `phonepe://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&am=${finalAmount}&cu=INR`;
+                            window.location.href = phonePeUrl;
+                            
+                            // ఒకవేళ యాప్ ఓపెన్ కాకపోతే బ్యాక్‌ఎండ్ ఆర్డర్ ప్రాసెస్ జరగడానికి ఫాల్‌బ్యాక్
+                            setTimeout(() => {
+                              handlePayment('PhonePe UPI');
+                            }, 1500);
+                          } 
+                          else if (method.name === 'Google Pay (GPay)') {
+                            // 🌟 గూగుల్ పే రియల్ యాప్ ఇంటెంట్ లింక్ (UPI Intent Scheme)
+                            const gpayUrl = `tez://upi/pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&am=${finalAmount}&cu=INR`;
+                            window.location.href = gpayUrl;
+                            
+                            setTimeout(() => {
+                              handlePayment('Google Pay');
+                            }, 1500);
+                          } 
+                          else {
+                            handlePayment(method.name);
+                          }
+                        }} 
+                        className={`w-full border p-2.5 rounded-xl text-xs font-bold flex justify-between items-center cursor-pointer transition ${darkMode ? 'bg-slate-700 border-slate-600 hover:bg-slate-600' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}
+                      >
                         <span>{method.icon} {method.name}</span>
-                        <ChevronRight size={13} />
+                        <div className="flex items-center gap-1.5">
+                          {(method.name === 'PhonePe UPI' || method.name === 'Google Pay (GPay)') && (
+                            <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-md font-black">
+                              ₹{totalAmount.toFixed(2)}
+                            </span>
+                          )}
+                          <ChevronRight size={13} />
+                        </div>
                       </button>
                     ))}
                   </div>
+                    {/* 👇 సరిగ్గా ఇక్కడ ఆ QR కోడ్ కంటెయినర్‌ను పేస్ట్ చేయండి */}
+                <div className={`${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'} p-4 rounded-2xl border shadow-sm space-y-3 text-center`}>
+  <span className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider block">Scan & Pay via PhonePe / GPay </span>
+  
+  <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto border-2 border-amber-500">
+    <img 
+      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`upi://pay?pa=nbommali52@ybl&pn=FoodieeApp&am=${totalAmount.toFixed(2)}&cu=INR`)}`} 
+      alt="Payment QR Code" 
+      className="w-36 h-36 mx-auto rounded-lg"
+      onError={(e) => {
+        e.target.onerror = null;
+        e.target.src = `https://chart.googleapis.com/chart?chs=180x180&cht=qr&chl=${encodeURIComponent(`upi://pay?pa=nbommali52@ybl&pn=FoodieeApp&am=${totalAmount.toFixed(2)}&cu=INR`)}`;
+      }}
+    />
+    <div className="mt-2 space-y-1 bg-amber-50 p-2 rounded-xl border border-amber-200">
+      <p className="text-[10px] font-black text-slate-900">UPI ID: nbommali52@ybl</p>
+      <p className="text-sm font-black text-emerald-600 bg-emerald-50 py-1 px-2 rounded-lg border border-emerald-200">
+        Total Amount: ₹{totalAmount.toFixed(2)}
+      </p>
+    </div>
+  </div>
+</div>
+
                 </div>
               ) : activeTab === 'favorites' ? (
                 <div className="space-y-2.5 text-xs">
@@ -1967,27 +3110,42 @@ export default function CustomerApp() {
                     ))
                   )}
                 </div>
-              ) : activeTab === 'address' ? (
-                <div className="space-y-4 text-xs animate-fadeIn">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-gray-400 uppercase tracking-wider text-[11px]">Your Saved Addresses</h3>
-                    <span className="text-[10px] text-amber-400 font-bold">Ichapuram Zone 📍</span>
-                  </div>
+             ) : activeTab === 'address' ? (
+    <div className="space-y-4 text-xs animate-fadeIn">
+      
+      {/* 👇 ఇక్కడ కొత్తగా బ్యాక్ బటన్ యాడ్ చేయండి */}
+      <div className="flex items-center gap-2 mb-1">
+        <button 
+          onClick={() => setActiveTab('home')} 
+          className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow cursor-pointer transition border border-slate-700"
+        >
+          <span>←</span> Back to Dashboard
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h3 className="font-black text-gray-400 uppercase tracking-wider text-[11px]">Your Saved Addresses</h3>
+  
+      </div>
 
                   <div className="space-y-2.5">
-                    {savedAddresses.map((addr) => (
-                      <div key={addr.id} className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 p-4 rounded-[24px] shadow-xl flex justify-between items-start relative overflow-hidden group hover:border-[#fc8019] transition-all">
-                        <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/10 rounded-full blur-xl group-hover:bg-orange-500/20 transition-all"></div>
-                        <div className="space-y-1 relative z-10">
-                          <span className="bg-[#fc8019]/20 text-[#fc8019] text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">{addr.type}</span>
-                          <p className="font-black text-white mt-1 text-xs">{addr.name} • <span className="text-slate-400 font-medium">{addr.mobile}</span></p>
-                          <p className="text-[11px] text-slate-300 leading-relaxed">
-                            {addr.houseNo ? `${addr.houseNo}, ` : ''}{addr.street}, {addr.landmark ? `Near ${addr.landmark}, ` : ''}{addr.district}, {addr.state} - {addr.pincode}
-                          </p>
+                    {savedAddresses.length === 0 ? (
+                      <p className="text-slate-400 text-center py-4">No saved addresses found. Add one below!</p>
+                    ) : (
+                      savedAddresses.map((addr) => (
+                        <div key={addr.id} className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 p-4 rounded-[24px] shadow-xl flex justify-between items-start relative overflow-hidden group hover:border-[#fc8019] transition-all">
+                          <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/10 rounded-full blur-xl group-hover:bg-orange-500/20 transition-all"></div>
+                          <div className="space-y-1 relative z-10">
+                            <span className="bg-[#fc8019]/20 text-[#fc8019] text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">{addr.type}</span>
+                            <p className="font-black text-white mt-1 text-xs">{addr.name || localStorage.getItem('userName')} • <span className="text-slate-400 font-medium">{addr.mobile}</span></p>
+                            <p className="text-[11px] text-slate-300 leading-relaxed">
+                              {addr.houseNo ? `${addr.houseNo}, ` : ''}{addr.street}, {addr.landmark ? `Near ${addr.landmark}, ` : ''}{addr.district}, {addr.state} - {addr.pincode}
+                            </p>
+                          </div>
+                          <button onClick={() => { setAddress(addr); toast.success(`✓ Active delivery address set to ${addr.type}`); }} className="bg-slate-800 hover:bg-[#fc8019] text-white hover:text-slate-950 px-3 py-1.5 rounded-xl text-[10px] font-black transition cursor-pointer shadow-md relative z-10">Select</button>
                         </div>
-                        <button onClick={() => { setAddress(addr); toast.success(`✓ Active delivery address set to ${addr.type}`); }} className="bg-slate-800 hover:bg-[#fc8019] text-white hover:text-slate-950 px-3 py-1.5 rounded-xl text-[10px] font-black transition cursor-pointer shadow-md relative z-10">Select</button>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
 
                   <div className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-amber-500/40 p-5 rounded-[32px] space-y-3.5 shadow-2xl relative overflow-hidden mt-4">
@@ -2056,11 +3214,22 @@ export default function CustomerApp() {
                   </div>
                 </div>
               ) : activeTab === 'offers' ? (
-                <div className="space-y-4 text-xs animate-fadeIn pb-12">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-black text-gray-400 uppercase tracking-wider text-[11px]">* Offers & Rewards Hub</h3>
-                    <span className="text-[10px] text-amber-400 font-bold">Scratch & Earn (&lt; ₹25)</span>
-                  </div>
+    <div className="space-y-4 text-xs animate-fadeIn pb-12">
+      
+      {/* 👇 ఇక్కడ కొత్తగా బ్యాక్ బటన్ యాడ్ చేయండి */}
+      <div className="flex items-center gap-2 mb-1">
+        <button 
+          onClick={() => setActiveTab('home')} 
+          className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow cursor-pointer transition border border-slate-700"
+        >
+          <span>←</span> Back to Dashboard
+        </button>
+      </div>
+
+      <div className="flex justify-between items-center">
+        <h3 className="font-black text-gray-400 uppercase tracking-wider text-[11px]">Offers & Rewards Hub</h3>
+        <span className="text-[10px] text-amber-400 font-bold">Scratch & Earn</span>
+      </div>
 
                   <div className="space-y-3">
                     {scratchCards.length === 0 ? (
@@ -2104,31 +3273,54 @@ export default function CustomerApp() {
                   <div className="space-y-3 pt-1">
                     <div className="flex items-center justify-between px-1">
                       <h3 className="text-xs font-black uppercase tracking-wider text-gray-500 dark:text-slate-400">Explore Categories</h3>
-                      <span className="text-[10px] text-[#fc8019] font-bold">Ichapuram Specials</span>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { name: 'Food', icon: '🍚', desc: 'Biryani & Tiffins', lightBg: 'bg-amber-50 border-amber-300 text-slate-900', darkBg: 'bg-gradient-to-br from-amber-500/20 via-slate-900 to-slate-900 border-amber-500/50 text-white', accent: 'bg-amber-500' },
-                        { name: 'Grocery', icon: '🛒', desc: 'Daily Essentials', lightBg: 'bg-emerald-50 border-emerald-300 text-slate-900', darkBg: 'bg-gradient-to-br from-emerald-500/20 via-slate-900 to-slate-900 border-emerald-500/50 text-white', accent: 'bg-emerald-500' },
-                        { name: 'Meat & Fish', icon: '🥩', desc: 'Chicken, Mutton & Fish', lightBg: 'bg-rose-50 border-rose-300 text-slate-900', darkBg: 'bg-gradient-to-br from-rose-500/20 via-slate-900 to-slate-900 border-rose-500/50 text-white', accent: 'bg-rose-500' }
-                      ].map(cat => (
-                        <button 
-                          key={cat.name} 
-                          onClick={() => setSelectedCategory(cat.name)} 
-                          className={`relative group overflow-hidden border-2 p-3.5 rounded-[28px] flex flex-col items-center text-center shadow-md hover:-translate-y-1 transition-all duration-300 cursor-pointer backdrop-blur-xl ${
-                            darkMode ? cat.darkBg : cat.lightBg
-                          }`}
-                        >
-                          <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center text-2xl mb-2 group-hover:scale-110 transition-transform duration-300 border border-gray-200 dark:border-slate-700">
-                            {cat.icon}
-                          </div>
-                          <span className={`text-xs font-black tracking-tight group-hover:text-[#fc8019] transition-colors ${darkMode ? 'text-white' : 'text-gray-900'}`}>{cat.name}</span>
-                          <div className={`w-3 h-1 rounded-full ${cat.accent} mt-2 group-hover:w-6 transition-all duration-300`}></div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                   
+                  <div className="grid grid-cols-3 gap-3">
+    {[
+      { 
+        name: 'Food', 
+        icon: '🍚', 
+        desc: 'Biryani & Tiffins', 
+        lightBg: 'bg-gradient-to-br from-amber-400 via-orange-400 to-amber-500 border-amber-500 text-slate-950 shadow-xl shadow-amber-500/30', 
+        darkBg: 'bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700 border-amber-300 text-white shadow-[0_0_25px_rgba(245,158,11,0.5)]', 
+        accent: 'bg-white shadow-[0_0_12px_#ffffff]' 
+      },
+      { 
+        name: 'Grocery', 
+        icon: '🛒', 
+        desc: 'Daily Essentials', 
+        lightBg: 'bg-gradient-to-br from-emerald-400 via-teal-400 to-emerald-500 border-emerald-500 text-slate-950 shadow-xl shadow-emerald-500/30', 
+        darkBg: 'bg-gradient-to-br from-emerald-500 via-teal-600 to-emerald-700 border-emerald-300 text-white shadow-[0_0_25px_rgba(16,185,129,0.5)]', 
+        accent: 'bg-white shadow-[0_0_12px_#ffffff]' 
+      },
+      { 
+        name: 'Sweets & Snacks', 
+      icon: '🍬', 
+      desc: 'Traditional Sweets & Snacks', 
+      lightBg: 'bg-gradient-to-br from-yellow-300 via-amber-400 to-yellow-500 border-yellow-400 text-slate-950 shadow-xl shadow-yellow-500/40', 
+      darkBg: 'bg-gradient-to-br from-yellow-500 via-amber-600 to-yellow-700 border-yellow-300 text-white shadow-[0_0_25px_rgba(234,179,8,0.6)]', 
+      accent: 'bg-white shadow-[0_0_12px_#ffffff]'
+      }
+    ].map(cat => (
+      <button 
+        key={cat.name} 
+        onClick={() => setSelectedCategory(cat.name)} 
+        className={`relative group overflow-hidden border-2 p-4 rounded-[30px] flex flex-col items-center text-center hover:-translate-y-2 transition-all duration-300 cursor-pointer backdrop-blur-2xl ${
+          darkMode ? cat.darkBg : cat.lightBg
+        }`}
+      >
+        <div className="absolute inset-0 bg-gradient-to-t from-white/0 via-white/20 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+
+        <div className="w-14 h-14 rounded-2xl bg-white/95 dark:bg-slate-900/90 shadow-lg flex items-center justify-center text-2xl mb-2 group-hover:scale-110 transition-transform duration-300 border border-white/40">
+          {cat.icon}
+        </div>
+        <span className="text-xs font-black tracking-tight drop-shadow-sm">{cat.name}</span>
+        <div className={`w-5 h-1.5 rounded-full ${cat.accent} mt-2 group-hover:w-10 transition-all duration-300`}></div>
+      </button>
+    ))}
+  </div>
+</div>
 
                   <div className="flex gap-2 overflow-x-auto pb-1 pt-1">
                     {['All', '🔥 Trending', '⚡ Fast Delivery', '⭐ Top Rated'].map((filter) => (
@@ -2196,17 +3388,7 @@ export default function CustomerApp() {
                     <p className="text-xs text-slate-300 font-medium">Get your hot food, groceries & meat delivered at your doorstep within 15-20 minutes in Ichapuram!</p>
                   </div>
 
-                  <div className="relative overflow-hidden bg-gradient-to-br from-purple-600 via-indigo-600 to-violet-800 shadow-purple-500/20 p-4 rounded-3xl text-white shadow-xl shadow-orange-500/20 border border-white/20 transform hover:scale-[1.02] transition-transform">
-                    <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-white/10 blur-2xl"></div>
-                    <div className="flex justify-between items-center relative z-10">
-                      <div className="space-y-1">
-                        <span className="bg-white/20 text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">Special Offer</span>
-                        <p className="font-black text-base tracking-tight mt-1">🎉 Ichapuram Food Fest</p>
-                        <p className="text-[11px] opacity-90 font-medium">20% OFF on local tiffins & meals!</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-white/25 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner border border-white/30">🍕</div>
-                    </div>
-                  </div>
+                 
                 </div>
               ) : selectedCategory && !selectedShop ? (
                 <div className="space-y-4 animate-fadeIn pb-12">
@@ -2214,9 +3396,7 @@ export default function CustomerApp() {
                     <button onClick={() => setSelectedCategory(null)} className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1.5 transition cursor-pointer">
                       <ArrowLeft size={14} /> Back to Categories
                     </button>
-                    <span className="text-[10px] bg-[#fc8019]/20 text-[#fc8019] border border-[#fc8019]/30 px-2.5 py-1 rounded-full font-black uppercase tracking-wider">
-                      Ichapuram Zone 📍
-                    </span>
+                  
                   </div>
 
                   <div className="space-y-1 px-1">
@@ -2277,72 +3457,91 @@ export default function CustomerApp() {
                         .map(shop => (
                           <div 
                             key={shop.id} 
-                            onClick={() => setSelectedShop(shop)} 
+                            onClick={() => { 
+                              if (shop.shopOpen === false) {
+                                toast.error('❌ This shop is currently closed!');
+                                return;
+                              }
+                              setSelectedCategory(shop.category || 'Food'); 
+                              setSelectedShop(shop); 
+                            }} 
                             className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 rounded-[30px] overflow-hidden shadow-xl shadow-black/30 cursor-pointer group hover:border-[#fc8019] transition-all duration-300 transform hover:scale-[1.01] relative"
                           >
                             <div className="absolute top-0 right-0 w-28 h-28 bg-orange-500/10 rounded-full blur-2xl group-hover:bg-orange-500/20 transition-all"></div>
-
+                            
                             <div className="w-full h-36 relative overflow-hidden bg-slate-950">
-                              <img 
-                                src={shop.imageUrl} 
-                                alt={shop.name} 
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 opacity-90" 
-                              />
-                              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"></div>
+    <img 
+        src={shop.imageUrl} 
+        alt={shop.name} 
+        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 opacity-90" 
+    />
+    
+    {/* 👇 ఇక్కడ ఈ కోడ్ పేస్ట్ చేయాలి */}
+    {shop.shopOpen === false && (
+    <div className="absolute inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-20">
+        <span className="bg-rose-500 text-white font-black px-3 py-1.5 rounded-full text-xs uppercase shadow-lg">Shop Closed ❌</span>
+    </div>
+)}
+    
+    <div className="absolute top-3 left-3 right-3 flex justify-between items-center z-10">
+        <span className="bg-slate-950/80 backdrop-blur-md text-amber-400 border border-amber-500/30 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider shadow">
+            ⚡ {shop.time || '15-20 mins'}
+        </span>
+        <button 
+            onClick={(e) => { 
+                e.stopPropagation(); 
+                toggleFavorite(shop); 
+            }} 
+            className="w-9 h-9 rounded-full bg-slate-950/80 backdrop-blur-md border border-slate-700 flex items-center justify-center text-sm shadow transition hover:scale-110 cursor-pointer"
+        >
+            {favorites.some(f => f.id === shop.id) ? '❤' : '🤍'}
+        </button>
+    </div>
 
-                              <div className="absolute top-3 left-3 right-3 flex justify-between items-center z-10">
-                                <span className="bg-slate-950/80 backdrop-blur-md text-amber-400 border border-amber-500/30 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider shadow">
-                                  ⚡ {shop.time || '15-20 mins'}
-                                </span>
-                                <button 
-                                  onClick={(e) => { 
-                                    e.stopPropagation(); 
-                                    toggleFavorite(shop); 
-                                  }} 
-                                  className="w-9 h-9 rounded-full bg-slate-950/80 backdrop-blur-md border border-slate-700 flex items-center justify-center text-sm shadow transition hover:scale-110 cursor-pointer"
-                                >
-                                  {favorites.some(f => f.id === shop.id) ? '❤️' : '🤍'}
-                                </button>
-                              </div>
+    <div className="absolute bottom-3 left-4 right-4 z-10 flex justify-between items-end">
+        <div className="space-y-0.5">
+            <h4 className="text-sm font-black text-white group-hover:text-[#fc8019] transition-colors drop-shadow">
+                {shop.name}
+            </h4>
+            <p className="text-[10px] text-slate-300 font-medium truncate max-w-[220px]">
+                {shop.address}
+            </p>
+        </div>
+    </div>
+</div>
+                           
+                          
 
-                              <div className="absolute bottom-3 left-4 right-4 z-10 flex justify-between items-end">
-                                <div className="space-y-0.5">
-                                  <h4 className="text-sm font-black text-white group-hover:text-[#fc8019] transition-colors drop-shadow">
-                                    {shop.name}
-                                  </h4>
-                                  <p className="text-[10px] text-slate-300 font-medium truncate max-w-[220px]">
-                                    {shop.address}
-                                  </p>
-                                </div>
-                                
-                                <div className="bg-emerald-600 text-white text-[11px] font-black px-2.5 py-1 rounded-xl shadow-lg flex items-center gap-1 shrink-0 border border-emerald-400/30">
-                                  <span>★</span> {shop.rating.replace(' ⭐', '')}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="px-4 py-3 bg-slate-950/60 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-                              <span className="text-slate-400 font-bold uppercase tracking-wider text-[9px]">
-                                {shop.category || selectedCategory} • Open Now
-                              </span>
-                              <div className="flex items-center gap-1 text-[#fc8019] font-black group-hover:translate-x-1 transition-transform">
-                                <span>Explore Menu</span>
-                                <ChevronRight size={14} />
-                              </div>
-                            </div>
+                            <div className="px-4 py-3 bg-slate-950/80 border-t border-slate-800/80 flex items-center justify-between text-[11px] relative z-20">
+  <span className={`text-[10px] font-bold uppercase tracking-wider ${shop.shopOpen === false ? 'text-rose-400' : 'text-emerald-400'}`}>
+    {shop.shopOpen === false ? '🔴 Closed • Opens at 9:00 AM' : '🟢 FOOD • OPEN NOW'}
+  </span>
+  <div className="flex items-center gap-1 text-[#fc8019] font-black">
+    <span>Explore Menu</span>
+    <ChevronRight size={14} />
+  </div>
+</div>
                           </div>
                         ))
                     )}
                   </div>
                 </div>
-              ) : selectedCategory && selectedShop ? (
+
+                   ) : selectedCategory && selectedShop ? (
                 <div className="space-y-4 animate-fadeIn pb-16">
                   <button onClick={() => setSelectedShop(null)} className="text-xs font-bold text-slate-400 flex items-center gap-1 hover:text-white transition cursor-pointer">
                     <ArrowLeft size={14} /> Back to Shops
                   </button>
 
-                  {/* --- RENDER AUTO-SLIDING BANNER USING SUB-COMPONENT --- */}
                   <ShopBannerSlider selectedShop={selectedShop} />
+                  {/* 👇 షాప్ క్లోజ్ అయినప్పుడు కస్టమర్‌కి కనిపించే వార్నింగ్ బ్యానర్ ఇక్కడ యాడ్ చేయండి */}
+    {selectedShop.shopOpen === false && (
+      <div className="bg-rose-500/15 border border-rose-500/40 text-rose-400 p-3 rounded-2xl text-center text-xs font-bold mb-3 shadow-md animate-pulse">
+        🔴 ఈ షాప్ ప్రస్తుతం మూసివేయబడింది (Shop Closed). మీరు ఐటెమ్స్ చూడవచ్చు కానీ ఆర్డర్ చేయడానికి వీలులేదు.
+      </div>
+    )}
+
+                  
 
                   {Object.keys(selectedShop.categories).length === 0 ? (
                     <div className="text-center py-16 space-y-2">
@@ -2374,20 +3573,65 @@ export default function CustomerApp() {
                                 <div className="flex-1 min-w-0 space-y-1">
                                   <p className="font-black text-xs text-white truncate">{itemName}</p>
                                   <p className="text-[#fc8019] font-black text-xs">₹{itemPrice}</p>
+                                  {/* 🌟 ఐటెమ్ డిస్క్రిప్షన్ ఇక్కడ కస్టమర్‌కి కనిపిస్తుంది */}
+                                 {item.description && (
+                                  <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">
+                                {item.description}
+                                   </p>
+                                 )}
                                   <span className="text-[9px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md font-bold">Fresh & Tasty</span>
                                 </div>
 
-                                {cartItem ? (
-                                  <div className="flex items-center bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 rounded-xl px-3 py-1.5 gap-2 font-black shrink-0 text-xs shadow-md">
-                                    <button onClick={() => setCart(cart.map(c => c.id === itemId ? {...c, qty: c.qty - 1} : c).filter(c => c.qty > 0))}><Minus size={13}/></button>
-                                    <span>{cartItem.qty}</span>
-                                    <button onClick={() => setCart(cart.map(c => c.id === itemId ? {...c, qty: c.qty + 1} : c))}><Plus size={13}/></button>
-                                  </div>
-                                ) : (
-                                  <button onClick={() => setCart([...cart, { id: itemId, name: itemName, price: itemPrice, qty: 1 }])} className="bg-slate-800 hover:bg-[#fc8019] text-[#fc8019] hover:text-slate-950 border border-slate-700 px-3.5 py-2 rounded-xl font-black text-xs shrink-0 transition-all shadow-md cursor-pointer">
-                                    ADD +
-                                  </button>
-                                )}
+                              {item.available === false ? (
+  <button disabled className="bg-slate-800 text-rose-400 border border-rose-500/30 px-3 py-2 rounded-xl font-bold text-[10px] cursor-not-allowed opacity-75">
+    Out of Stock ❌
+  </button>
+) : selectedShop.shopOpen === false ? (
+  <button disabled className="bg-slate-800 text-slate-500 border border-slate-700 px-3.5 py-2 rounded-xl font-black text-[10px] cursor-not-allowed">
+    Closed ❌
+  </button>
+) : cartItem ? (
+  <div className="flex items-center bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 rounded-xl px-3 py-1.5 gap-2 font-black shrink-0 text-xs shadow-md">
+    <button onClick={() => setCart(cart.map(c => c.id === itemId ? {...c, qty: c.qty - 1} : c).filter(c => c.qty > 0))}><Minus size={13}/></button>
+    <span>{cartItem.qty}</span>
+    <button onClick={() => setCart(cart.map(c => c.id === itemId ? {...c, qty: c.qty + 1} : c))}><Plus size={13}/></button>
+  </div>
+) : (
+  <button 
+    onClick={() => {
+      // 0. Shop close unna check chesi alert ivvadaniki
+      if (selectedShop.shopOpen === false) {
+        toast.error('❌ Shop closed undi! Ee samayamlo orders accept cheyyabadavu.');
+        return;
+      }
+
+      // 1. Cart lo already items unte mariyu avi verae shop nundi ayithe check cheyyali
+      if (cart.length > 0 && cart.some(cartItemObj => cartItemObj.shopId && cartItemObj.shopId !== selectedShop.id)) {
+        if (!window.confirm("Verae shop nundi items unnayi. Vatini tholaginchi kotha shop items add cheyala?")) {
+          return;
+        }
+        setCart([{ id: itemId, name: itemName, price: itemPrice, qty: 1, shopId: selectedShop.id }]);
+        toast.success(`✓ Cart cleared & added ${itemName}!`);
+        return;
+      }
+
+      // 2. Normal ga item add chese logic
+      const existingIndex = cart.findIndex(c => c.id === itemId);
+      if (existingIndex > -1) {
+        const updated = [...cart];
+        updated[existingIndex].qty += 1;
+        setCart(updated);
+      } else {
+        setCart([...cart, { id: itemId, name: itemName, price: itemPrice, qty: 1, shopId: selectedShop.id }]);
+      }
+      toast.success(`✓ Added ${itemName} to cart!`);
+    }} 
+    className="bg-slate-800 hover:bg-[#fc8019] text-[#fc8019] hover:text-slate-950 border border-slate-700 px-3.5 py-2 rounded-xl font-black text-xs shrink-0 transition-all shadow-md cursor-pointer"
+  >
+    ADD +
+  </button>
+)}
+
                               </div>
                             );
                           })}
@@ -2397,20 +3641,31 @@ export default function CustomerApp() {
                   )}
                 </div>
               ) : activeTab === 'wallet' ? (
-                <div className="space-y-4 text-xs">
-                  <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4 rounded-3xl text-white shadow-xl shadow-orange-500/20 space-y-2">
-                    <p className="text-[9px] uppercase font-bold opacity-90 tracking-wider">Wallet Balance (Real-Time)</p>
-                    <h2 className="text-2xl font-black">₹{walletBalance.toFixed(2)}</h2>
-                    <button onClick={() => setIsAddMoneyModalOpen(true)} className="w-full bg-slate-900 hover:bg-slate-950 text-white py-3 rounded-2xl font-black text-xs shadow-md mt-2 flex items-center justify-center gap-1.5 cursor-pointer transition"><Plus size={15} /> Add Money 💳</button>
-                  </div>
+    <div className="space-y-4 text-xs animate-fadeIn">
+      
+      {/* 👇 ఇక్కడ కొత్తగా బ్యాక్ బటన్ యాడ్ చేయండి */}
+      <div className="flex items-center gap-2 mb-1">
+        <button 
+          onClick={() => setActiveTab('home')} 
+          className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow cursor-pointer transition border border-slate-700"
+        >
+          <span>←</span> Back to Dashboard
+        </button>
+      </div>
+
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4 rounded-3xl text-white shadow-xl shadow-orange-500/20 space-y-2">
+        <p className="text-[9px] uppercase font-bold opacity-90 tracking-wider">Wallet Balance (Real-Time)</p>
+        <h2 className="text-2xl font-black">₹{walletBalance.toFixed(2)}</h2>
+        <button onClick={() => setIsAddMoneyModalOpen(true)} className="w-full bg-slate-900 hover:bg-slate-950 text-white py-3 rounded-2xl font-black text-xs shadow-md mt-2 flex items-center justify-center gap-1.5 cursor-pointer transition"><Plus size={15} /> Add Money 💳</button>
+      </div>
 
                   <div className="pt-1">
                     <button onClick={() => setIsWalletHistoryOpen(true)} className="w-full bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-amber-500/40 p-4 rounded-3xl shadow-xl flex justify-between items-center cursor-pointer group hover:border-amber-500 transition-all duration-300">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-black text-base shadow-inner">📜</div>
                         <div className="text-left">
-                          <h4 className="text-xs font-black text-white group-hover:text-amber-400 transition-colors">Wallet History</h4>
-                          <p className="text-[10px] text-slate-400">View all past credits & debits</p>
+                          <h4 className="text-xs font-black text-white group-hover:text-amber-400 transition-colors">Wallet History (with Txn ID & Time)</h4>
+                          <p className="text-[10px] text-slate-400">View all past credits & debits with timestamps</p>
                         </div>
                       </div>
                       <div className="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 flex items-center justify-center group-hover:translate-x-1 transition-transform">
@@ -2419,12 +3674,23 @@ export default function CustomerApp() {
                     </button>
                   </div>
                 </div>
-              ) : activeTab === 'history' ? (
-                <div className="space-y-3 text-xs">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-black text-gray-400 uppercase">My Orders & Live Status (Latest on Top)</h3>
-                    <button onClick={() => { const userMob = phone || localStorage.getItem('userMobile'); if (userMob) { fetch(`${API_BASE_URL}/api/orders/customer/${userMob}`).then(res => res.json()).then(data => setBackendOrders(data)); toast.success('Refreshed!'); } }} className="text-[10px] bg-slate-800 text-amber-400 px-2.5 py-1 rounded-lg border border-slate-700">Refresh 🔄</button>
-                  </div>
+             ) : activeTab === 'history' ? (
+    <div className="space-y-3 text-xs animate-fadeIn">
+      
+      {/* 👇 ఇక్కడ కొత్తగా బ్యాక్ బటన్ యాడ్ చేయండి */}
+      <div className="flex items-center gap-2 mb-2">
+        <button 
+          onClick={() => setActiveTab('home')} 
+          className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow cursor-pointer transition border border-slate-700"
+        >
+          <span>←</span> Back to Dashboard
+        </button>
+      </div>
+
+      <div className="flex justify-between items-center">
+        <h3 className="font-black text-gray-400 uppercase">My Orders & Live Status (Latest on Top)</h3>
+        <button onClick={() => { const userMob = phone || localStorage.getItem('userMobile'); if (userMob) { fetch(`${API_BASE_URL}/api/orders/customer/${userMob}`).then(res => res.json()).then(data => setBackendOrders(data)); toast.success('Refreshed!'); } }} className="text-[10px] bg-slate-800 text-amber-400 px-2.5 py-1 rounded-lg border border-slate-700">Refresh 🔄</button>
+      </div>
 
                   {backendOrders.length === 0 ? (
                     <div className="text-center py-16 text-xs text-gray-400">📦 No active or past orders found.</div>
@@ -2454,7 +3720,28 @@ export default function CustomerApp() {
                             <button onClick={() => setActiveTrackingOrder(ord)} className="bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 px-3 py-1.5 rounded-xl font-black flex items-center gap-1 shadow-md">
                               <span>🛵 Track</span>
                             </button>
-                            <button onClick={() => setRatingModal(ord.id)} className="bg-slate-700 text-amber-400 px-2.5 py-1 rounded-bold">Rate</button>
+                            {/* 👇 Rate బటన్ పక్కనే 'Re-Order' బటన్ */}
+         {/* Re-Order Button */}
+<button 
+  onClick={() => {
+    // 1. Order lo unna items ni parse chesi cart loki load cheyadam
+    // Or direct ga ord.items ni cart items ga set cheyadam
+    const reorderItems = [{
+      id: Date.now(),
+      name: ord.items,
+      price: ord.totalAmount || ord.total,
+      qty: 1,
+      shopId: ord.shopId || 1
+    }];
+    
+    setCart(reorderItems);
+    setIsPaymentScreen(true); // Direct ga payment page/screen ki redirect avthundi
+    toast.success(`✓ Re-order items loaded! Please complete payment.`);
+  }} 
+  className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-xl font-black text-[10px] shadow cursor-pointer"
+>
+  🔄 Re-Order
+</button>
                           </div>
                         </div>
                       </div>
@@ -2462,27 +3749,38 @@ export default function CustomerApp() {
                   )}
                 </div>
               ) : activeTab === 'profile' ? (
-                <div className="space-y-4 text-xs animate-fadeIn pb-12">
-                  <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 p-5 rounded-[32px] shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-28 h-28 bg-[#fc8019]/10 rounded-full blur-2xl"></div>
-                    
-                    <div className="flex items-center gap-4 relative z-10">
-                      <img src={userPhoto} alt="Profile" className="w-16 h-16 rounded-2xl border-2 border-[#fc8019] object-cover shadow-lg shrink-0" />
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <h3 className="font-black text-base text-white truncate">{address.name || 'Foodiee User'}</h3>
-                        <p className="text-slate-400 text-xs font-bold">+91 {address.mobile || phone || localStorage.getItem('userMobile')}</p>
-                        <button 
-                          onClick={() => {
-                            setEditProfileName(address.name || '');
-                            setIsEditProfileModalOpen(true);
-                          }} 
-                          className="text-[10px] text-[#fc8019] font-black underline cursor-pointer hover:text-orange-400"
-                        >
-                          Edit Profile Details ✏️
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+    <div className="space-y-4 text-xs animate-fadeIn pb-12">
+      
+      {/* 👇 ఇక్కడ కొత్తగా బ్యాక్ బటన్ యాడ్ చేయండి */}
+      <div className="flex items-center gap-2 mb-1">
+        <button 
+          onClick={() => setActiveTab('home')} 
+          className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shadow cursor-pointer transition border border-slate-700"
+        >
+          <span>←</span> Back to Dashboard
+        </button>
+      </div>
+
+      <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 p-5 rounded-[32px] shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-28 h-28 bg-[#fc8019]/10 rounded-full blur-2xl"></div>
+        
+        <div className="flex items-center gap-4 relative z-10">
+          <img src={userPhoto} alt="Profile" className="w-16 h-16 rounded-2xl border-2 border-[#fc8019] object-cover shadow-lg shrink-0" />
+          <div className="flex-1 min-w-0 space-y-1">
+            <h3 className="font-black text-base text-white truncate">{address.name || localStorage.getItem('userName') || 'Foodiee User'}</h3>
+            <p className="text-slate-400 text-xs font-bold">+91 {address.mobile || phone || localStorage.getItem('userMobile')}</p>
+            <button 
+              onClick={() => {
+                setEditProfileName(address.name || localStorage.getItem('userName') || '');
+                setIsEditProfileModalOpen(true);
+              }} 
+              className="text-[10px] text-[#fc8019] font-black underline cursor-pointer hover:text-orange-400"
+            >
+              Edit Profile Details ✏️
+            </button>
+          </div>
+        </div>
+      </div>
 
                   <div className="grid grid-cols-3 gap-2.5">
                     <div onClick={() => setActiveTab('history')} className="bg-slate-900/90 border border-slate-800 p-3 rounded-2xl text-center space-y-1 cursor-pointer hover:border-[#fc8019] transition">
@@ -2505,23 +3803,23 @@ export default function CustomerApp() {
                   </div>
 
                   <div className="bg-slate-900/90 border border-slate-800 rounded-[32px] p-3 space-y-1 shadow-lg">
-                    <button onClick={() => setActiveTab('address')} className="w-full flex items-center justify-between p-3.5 rounded-2xl hover:bg-slate-800/80 transition cursor-pointer">
+                    <button onClick={() => setIsWalletHistoryOpen(true)} className="w-full flex items-center justify-between p-3.5 rounded-2xl hover:bg-slate-800/80 transition cursor-pointer">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-[#fc8019] flex items-center justify-center font-bold text-sm">📍</div>
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">💳</div>
                         <div className="text-left">
-                          <p className="font-black text-white text-xs">Addresses</p>
-                          <p className="text-[10px] text-slate-400">Share, edit & add new delivery locations</p>
+                          <p className="font-black text-white text-xs">Payment Details & Transactions</p>
+                          <p className="text-[10px] text-slate-400">View all wallet history, order payments & IDs</p>
                         </div>
                       </div>
                       <ChevronRight size={16} className="text-slate-400" />
                     </button>
 
-                    <button onClick={() => setIsWalletHistoryOpen(true)} className="w-full flex items-center justify-between p-3.5 rounded-2xl hover:bg-slate-800/80 transition cursor-pointer">
+                    <button onClick={() => setActiveTab('address')} className="w-full flex items-center justify-between p-3.5 rounded-2xl hover:bg-slate-800/80 transition cursor-pointer">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm">📜</div>
+                        <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-[#fc8019] flex items-center justify-center font-bold text-sm">📍</div>
                         <div className="text-left">
-                          <p className="font-black text-white text-xs">Payment & Wallet History</p>
-                          <p className="text-[10px] text-slate-400">View transaction records & refunds</p>
+                          <p className="font-black text-white text-xs">Saved Addresses</p>
+                          <p className="text-[10px] text-slate-400">Share, edit & add new delivery locations</p>
                         </div>
                       </div>
                       <ChevronRight size={16} className="text-slate-400" />
@@ -2541,7 +3839,7 @@ export default function CustomerApp() {
 
                   <div className="pt-1">
                     <button 
-                      onClick={() => { setIsLoggedIn(false); setStep(1); setOtpInput(''); }} 
+                      onClick={() => { setIsLoggedIn(false); localStorage.removeItem('userMobile'); localStorage.removeItem('userName'); }} 
                       className="w-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 py-4 rounded-2xl font-black text-xs shadow-lg flex items-center justify-center gap-2 transition cursor-pointer"
                     >
                       <LogOut size={16} /> Logout from Foodiee
@@ -2552,7 +3850,6 @@ export default function CustomerApp() {
 
             </main>
 
-            {/* FLOATING PROCEED TO PAY BAR */}
             {!isPaymentScreen && !activeTrackingOrder && selectedCategory !== 'Print' && cart.length > 0 && (
               <div className="absolute bottom-14 inset-x-0 p-3 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800 z-40 shadow-2xl">
                 <div className="bg-slate-950 text-white p-2.5 rounded-2xl flex justify-between items-center shadow-inner border border-slate-800">
@@ -2560,14 +3857,13 @@ export default function CustomerApp() {
                     <p className="text-[9px] text-slate-400 font-extrabold uppercase">{cart.reduce((a, b) => a + b.qty, 0)} Items Added</p>
                     <p className="text-xs font-black text-[#fc8019]">₹{subtotal + deliveryFee}</p>
                   </div>
-                  <button onClick={() => setIsPaymentScreen(true)} className="bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1 shadow-md">
+                  <button onClick={() => setIsPaymentScreen(true)} className="bg-gradient-to-r from-[#fc8019] to-amber-500 text-slate-950 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1 shadow-md cursor-pointer">
                     <span>Proceed to Pay</span> <ChevronRight size={14} />
                   </button>
                 </div>
               </div>
             )}
 
-            {/* FIXED BOTTOM NAVIGATION BAR */}
             <nav className={`absolute bottom-0 inset-x-0 h-14 ${darkMode ? 'bg-slate-800/95 border-slate-700 text-slate-400' : 'bg-white/95 border-gray-200 text-gray-500'} backdrop-blur-md border-t flex justify-around items-center px-1 z-50 text-[10px] font-bold`}>
               <button onClick={() => { setActiveTab('home'); setSelectedCategory(null); setSelectedShop(null); setIsPaymentScreen(false); setActiveTrackingOrder(null); }} className={`flex flex-col items-center gap-0.5 transition ${activeTab === 'home' ? 'text-[#fc8019] scale-105' : 'hover:text-white'}`}>
                 <ShoppingBag size={18} /><span>Home</span>

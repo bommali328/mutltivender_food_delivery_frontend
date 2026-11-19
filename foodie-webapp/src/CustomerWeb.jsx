@@ -1237,7 +1237,7 @@ export default function CustomerWeb() {
                   <div className="space-y-4 text-xs animate-fadeIn max-w-2xl mx-auto">
                     <div className="flex items-center justify-between">
                       <h3 className="font-black text-gray-400 uppercase tracking-wider text-xs">Your Saved Addresses</h3>
-                      <span className="text-xs text-amber-400 font-bold">Ichapuram Zone 📍</span>
+                      
                     </div>
 
                     <div className="space-y-3">

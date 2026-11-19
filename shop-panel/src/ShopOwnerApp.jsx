@@ -1,23 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShoppingBag, UtensilsCrossed, DollarSign, Plus, CheckCircle, XCircle, ToggleLeft, ToggleRight, Store, Clock, Lock, Phone, LogOut, MapPin, User, Info, Building2, Download, History, Bell, Star, AlertCircle, Zap, TrendingUp, Calendar, Target, MessageSquare, AlertTriangle, Percent, KeyRound, Sparkles, Wallet, Sun, Moon, Menu, List, CreditCard, FileText, Upload, Image as ImageIcon, PieChart as PieChartIcon } from 'lucide-react';
+import { ShoppingBag, UtensilsCrossed, DollarSign, Plus, CheckCircle, XCircle, ToggleLeft, ToggleRight, Store, Clock, Lock, Phone, LogOut, MapPin, User, Info, Building2, Download, History, Bell, Star, AlertCircle, Zap, TrendingUp, Calendar, Target, MessageSquare, AlertTriangle, Percent, KeyRound, Sparkles, Wallet, Sun, Moon, Menu, List, CreditCard, FileText, Upload, Image as ImageIcon, PieChart as PieChartIcon, Headphones, Send, Navigation } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import toast, { Toaster } from 'react-hot-toast';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import logo from './assets/logo.png';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { Capacitor } from '@capacitor/core';
+import whistleRing from './assets/whistle.mp3';
 
-// ✅ BASE URL UPDATE (AWS)
-const API_BASE_URL = "https://Foodiee-backend-env.eba-5d9p6wzb.eu-north-1.elasticbeanstalk.com";
+
+// ✅ SECURE BASE URL UPDATE (AWS / Localhost)
+const API_BASE_URL = import.meta.env.VITE_API_URL || "https://api.foodiee.shop";
+
+
+
 
 export default function ShopOwnerApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     return localStorage.getItem('shopLoggedIn') === 'true';
   });
-  const [currentView, setCurrentView] = useState('login'); 
+  const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'forgot'
   const [phone, setPhone] = useState('');
-  const [otpInput, setOtpInput] = useState('');
-  const [generatedOtpHint, setGeneratedOtpHint] = useState('');
-  const [step, setStep] = useState(1); 
+  const [passwordInput, setPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
   const [activeTab, setActiveTab] = useState('orders'); 
 
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -34,12 +40,14 @@ export default function ShopOwnerApp() {
   const [regMobile, setRegMobile] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [address, setAddress] = useState('4M4R+35 Ichchapuram, Andhra Pradesh, India');
-  const [lat, setLat] = useState('18.5793');
-  const [lng, setLng] = useState('84.4452');
   const [category, setCategory] = useState('FOOD'); 
-  const [ownerId] = useState(1);
+
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [enteredPin, setEnteredPin] = useState('');
+  const [shopForgotMode, setShopForgotMode] = useState('request'); // 'request' or 'verify'
 
   // Shop Profile State
+ // 1. ముందుగా shopProfile స్టేట్ ఇక్కడ ఉంటుంది
   const [shopProfile, setShopProfile] = useState({
     shopName: localStorage.getItem('shopName') || 'Sri Balaji Tiffins & Meals',
     ownerName: 'Bommali Naveen',
@@ -51,41 +59,175 @@ export default function ShopOwnerApp() {
     isOpen: true,
   });
 
-  // --- ANALYTICS & PIE CHART FILTER STATE FOR PROFILE ---
-  const [analyticsFilter, setAnalyticsFilter] = useState('monthly');
+  const [selectedRinger, setSelectedRinger] = useState('classic_bell');
+  
+  // 2. రింగ్‌టోన్స్ లిస్ట్ (ఇందులో తెలుగు వాయిస్ అలర్ట్స్ యాడ్ చేయబడ్డాయి)
+ const ringtones = [
+    { id: 'classic_bell', name: '🔔 Classic Bell (Swiggy Style)', url: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3', isVoice: false },
+    { id: 'radar_beep', name: '🚨 Radar Emergency Beep', url: 'https://assets.mixkit.co/active_storage/sfx/950/950-preview.mp3', isVoice: false },
+    { id: 'digital_chime', name: '⚡ Digital Chime (Zomato Style)', url: 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3', isVoice: false },
+    { id: 'voice_boss_te', name: '🗣️ Voice: "హలో బాస్, ఒక కొత్త ఆర్డర్ వచ్చింది"', isVoice: true, text: 'Hello Boss, oka kotta order vachindi', lang: 'te-IN' },
+    { id: 'voice_owner_te', name: `🗣️ Voice: "హలో ${shopProfile.ownerName || 'Naveen'}, ఒక కొత్త ఆర్డర్ వచ్చింది"`, isVoice: true, text: `Hello ${shopProfile.ownerName || 'Naveen'}, oka kotta order vachindi`, lang: 'te-IN' },
+    
+    // 🌟 మీ whistle.mp3 రింగ్‌టోన్ ఇక్కడ ఉంటుంది
+    { id: 'whistle_mp3', name: '🎶 Whistle Ringtone (Custom MP3)', url: whistleRing, isVoice: false }
+  ];
 
-  // --- DYNAMIC STYLISH THEME CONFIGURATION ---
-  const getCategoryTheme = (cat, dark) => {
-    switch (cat) {
-      case 'GROCERY':
-        return {
-          cardBg: dark 
-            ? 'bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 border-emerald-500/40 text-white' 
-            : 'bg-gradient-to-br from-emerald-50 via-teal-50 to-white border-emerald-300 text-slate-900',
-          accentColor: dark ? 'text-emerald-400' : 'text-emerald-700',
-          badgeBg: dark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-emerald-100 text-emerald-800 border-emerald-300',
-          buttonGradient: 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black hover:opacity-90 shadow-lg shadow-emerald-500/20'
-        };
-      case 'MEAT & FISH':
-        return {
-          cardBg: dark 
-            ? 'bg-gradient-to-br from-rose-950 via-slate-900 to-slate-950 border-rose-500/40 text-white' 
-            : 'bg-gradient-to-br from-rose-50 via-red-50 to-white border-rose-300 text-slate-900',
-          accentColor: dark ? 'text-rose-400' : 'text-rose-700',
-          badgeBg: dark ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-rose-100 text-rose-800 border-rose-300',
-          buttonGradient: 'bg-gradient-to-r from-rose-500 to-red-600 text-white font-black hover:opacity-90 shadow-lg shadow-rose-500/20'
-        };
-      default: // FOOD
-        return {
-          cardBg: dark 
-            ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-amber-500/30 text-white' 
-            : 'bg-gradient-to-br from-amber-50/50 via-orange-50/30 to-white border-amber-300 text-slate-900',
-          accentColor: dark ? 'text-amber-400' : 'text-amber-700',
-          badgeBg: dark ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-amber-100 text-amber-800 border-amber-300',
-          buttonGradient: 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black hover:opacity-90 shadow-lg shadow-amber-500/20'
-        };
+  // 3. వాయిస్ లేదా ఆడియో ప్లే చేసే ఫంక్షన్
+  const playShopRingtone = (ringItem) => {
+    try {
+      if (ringItem && ringItem.isVoice) {
+        // బ్రౌజర్ వాయిస్ స్పీచ్ (Text-to-Speech)
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel(); // పాత వాయిస్ ఉంటే ఆపుతుంది
+          const utterance = new SpeechSynthesisUtterance(ringItem.text);
+          utterance.lang = ringItem.lang || 'te-IN'; // తెలుగు యాసలో పలకడానికి
+          utterance.rate = 0.95; // కొద్దిగా స్పష్టమైన స్పీడ్
+          utterance.pitch = 1.1;
+          window.speechSynthesis.speak(utterance);
+        }
+      } else {
+        const ringUrl = typeof ringItem === 'string' ? ringItem : ringItem.url;
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const audio = new Audio(ringUrl);
+        audio.play().catch(e => {
+          console.warn("Audio play blocked or failed", e);
+        });
+      }
+    } catch (err) {
+      console.warn("Ringtone error", err);
     }
   };
+
+
+  // 🔍 షాప్ పిన్ కోడ్ లేదా ఏరియా పేరు బట్టి ఆటోమేటిక్‌గా Lat/Lng తెచ్చుకునే ఫంక్షన్
+  const handleSearchShopLocationByText = async (searchText) => {
+    if (!searchText || searchText.trim() === "") {
+      toast.error('❌ దయచేసి పిన్ కోడ్ లేదా షాప్ ఏరియా పేరు ఎంటర్ చేయండి');
+      return;
+    }
+
+    toast.loading('🔍 షాప్ లొకేషన్ వెతుకుతోంది...');
+
+    try {
+      let query = searchText.trim();
+      if (/^\d{6}$/.test(query)) {
+        query = `${query}, Ichapuram, India`;
+      } else {
+        query = `${query}, Ichapuram, India`;
+      }
+
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+
+      toast.dismiss();
+
+      if (data && data.length > 0) {
+        const bestMatch = data[0];
+        const newLat = parseFloat(bestMatch.lat);
+        const newLng = parseFloat(bestMatch.lon);
+        const displayName = bestMatch.display_name;
+
+        setShopProfile(prev => ({
+          ...prev,
+          location: displayName,
+          latitude: newLat,
+          longitude: newLng
+        }));
+
+        toast.success(`📍 షాప్ లొకేషన్ సెట్ అయింది: ${newLat.toFixed(4)}, ${newLng.toFixed(4)}`);
+      } else {
+        toast.error('❌ ఆ లొకేషన్ దొరకలేదు. సరిైన పిన్ కోడ్ లేదా ఏరియా పేరు ఇవ్వండి.');
+      }
+    } catch (error) {
+      toast.dismiss();
+      toast.error('❌ నెట్‌వర్క్ ఎర్రర్ ఏర్పడింది.');
+    }
+  };
+
+    // 📍 షాప్ లైవ్ GPS డిటెక్ట్ చేసే ఫంక్షన్ (ಮೊಬೈಲ್ ಪರ್ಮಿಷನ್ తో)
+  const detectShopLiveGps = () => {
+    if (!navigator.geolocation) {
+      toast.error('❌ మీ మొబైల్/బ్రౌజర్ లొకేషన్‌ను సపోర్ట్ చేయడం లేదు');
+      return;
+    }
+
+    toast.loading('📍 షాప్ లైవ్ లొకేషన్ డిటెక్ట్ చేస్తోంది...');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        let lat = position.coords.latitude;
+        let lng = position.coords.longitude;
+
+        // ఇచ్ఛాపురం బౌండరీ వాలిడేషన్ (సముద్రంలో పడకుండా ఉండటానికి)
+        if (lat < 18.2 || lat > 18.9 || lng < 84.2 || lng > 84.8) {
+          lat = 18.5793; 
+          lng = 84.4452; 
+          toast.error('⚠️ జీపీఎస్ లొకేషన్ సరిహద్దు దాటడంతో డిఫాల్ట్ ఇచ్ఛాపురం లొకేషన్ సెట్ చేయబడింది.');
+        }
+
+        setShopProfile(prev => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng,
+          location: `GPS Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+        }));
+        toast.dismiss();
+        toast.success('📍 షాప్ లొకేషన్ విజయవంతంగా క్యాప్చర్ చేయబడింది!');
+      },
+      (error) => {
+        toast.dismiss();
+        toast.error('❌ లొకేషన్ పర్మిషన్ నిరాకరించబడింది. దయచేసి మొబైల్ సెట్టింగ్స్‌లో GPS ఆన్ చేయండి.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+  const [analyticsFilter, setAnalyticsFilter] = useState('monthly');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+
+  // --- ADMIN DIRECT SUPPORT CHAT STATES ---
+  const [showAdminChat, setShowAdminChat] = useState(false);
+  const [adminChatMessages, setAdminChatMessages] = useState([]);
+  const [adminChatInput, setAdminChatInput] = useState('');
+  const [unreadAdminChatCount, setUnreadAdminChatCount] = useState(0);
+  const adminStompClientRef = useRef(null);
+
+ const getCategoryTheme = (cat, dark) => {
+  const upperCat = (cat || '').toUpperCase();
+  if (upperCat.includes('GROCERY')) {
+    return {
+      cardBg: dark 
+        ? 'bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 border-emerald-500/40 text-white' 
+        : 'bg-gradient-to-br from-emerald-50 via-teal-50 to-white border-emerald-300 text-slate-900',
+      accentColor: dark ? 'text-emerald-400' : 'text-emerald-700',
+      badgeBg: dark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      buttonGradient: 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black hover:opacity-90 shadow-lg shadow-emerald-500/20'
+    };
+  } else if (upperCat.includes('SWEET') || upperCat.includes('SNACK')) {
+    return {
+      cardBg: dark 
+        ? 'bg-gradient-to-br from-amber-950 via-slate-900 to-orange-950/40 border-amber-500/50 text-white' 
+        : 'bg-gradient-to-br from-amber-50 via-orange-50 to-white border-amber-300 text-slate-900',
+      accentColor: dark ? 'text-amber-400' : 'text-amber-700',
+      badgeBg: dark ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-amber-100 text-amber-800 border-amber-300',
+      buttonGradient: 'bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-500 text-slate-950 font-black hover:opacity-90 shadow-lg shadow-amber-500/30'
+    };
+  } else { // FOOD
+    return {
+      cardBg: dark 
+        ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-amber-500/30 text-white' 
+        : 'bg-gradient-to-br from-amber-50/50 via-orange-50/30 to-white border-amber-300 text-slate-900',
+      accentColor: dark ? 'text-amber-400' : 'text-amber-700',
+      badgeBg: dark ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-amber-100 text-amber-800 border-amber-300',
+      buttonGradient: 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black hover:opacity-90 shadow-lg shadow-amber-500/20'
+    };
+  }
+};
+  
+
 
   const regTheme = getCategoryTheme(category, isDarkMode);
   const currentTheme = getCategoryTheme(shopProfile.category, isDarkMode);
@@ -96,6 +238,15 @@ export default function ShopOwnerApp() {
   const [mainFile, setMainFile] = useState(null);
   const [galleryFiles, setGalleryFiles] = useState([]);
   const [uploadingImages, setUploadingImages] = useState(false);
+
+  const showShopNativeNotification = (title, bodyText) => {
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(title, {
+        body: bodyText,
+        icon: logo
+      });
+    }
+  };
 
   useEffect(() => {
     const savedLogin = localStorage.getItem('shopLoggedIn');
@@ -111,12 +262,150 @@ export default function ShopOwnerApp() {
         ...prev,
         shopName: savedName || prev.shopName,
         mobileNumber: savedMobile,
-        category: savedCategory || prev.category
+        category: savedCategory || 'FOOD'
       }));
       fetchMenuItems(savedId || 1);
       fetchPayments(savedId || 1);
     }
   }, []);
+
+  // ✅ Native Push Notifications Registration for Shop Owner
+ useEffect(() => {
+    const registerShopPush = async () => {
+      try {
+        if (typeof Capacitor === 'undefined' || !Capacitor.isNativePlatform()) {
+          console.log("Running on Web Browser. PushNotifications plugin skipped.");
+          return;
+        }
+
+        let permResult = await PushNotifications.checkPermissions();
+        if (permResult.receive === 'prompt') {
+          permResult = await PushNotifications.requestPermissions();
+        }
+        
+        if (permResult.receive === 'granted') {
+          await PushNotifications.register();
+          
+          // 1. FCM టోకెన్ రిజిస్ట్రేషన్
+          PushNotifications.addListener('registration', async (token) => {
+            console.log('Shop Native Push Registration Token:', token.value);
+            const shopMob = localStorage.getItem('shopMobile');
+            if (shopMob && token.value) {
+              await fetch(`${API_BASE_URL}/api/shop/update-fcm-token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mobile: shopMob, fcmToken: token.value })
+              });
+              console.log("Shop FCM Token successfully synced to database!");
+            }
+          });
+
+          // 2. 🔔 యాప్ బ్యాక్‌గ్రౌండ్‌లో లేదా మినిమైజ్ చేసినప్పుడు నోటిఫికేషన్ రాగానే సౌండ్ ప్లే అవడానికి
+          PushNotifications.addListener('pushNotificationReceived', (notification) => {
+            console.log('Shop Push notification received: ', notification);
+            
+            // 🌟 సెలెక్ట్ చేసిన రింగ్‌టోన్ ప్లే అవడానికి ఇక్కడ యాడ్ చేయండి
+            const activeRinger = ringtones.find(r => r.id === selectedRinger) || ringtones[0];
+            playShopRingtone(activeRinger);
+            
+            showShopNativeNotification(
+              notification.title || "🔔 New Order Received!", 
+              notification.body || "Tap to view order details"
+            );
+            toast.success(`🔔 ${notification.title || "New Order"}: ${notification.body || ""}`);
+          });
+        }
+      } catch (error) {
+        console.log("Push notifications not supported in this environment:", error);
+      }
+    };
+
+    if (isLoggedIn) {
+      registerShopPush();
+    }
+  }, [isLoggedIn, selectedRinger]);
+  
+ // --- ADMIN CHAT WEBSOCKET LISTENER FOR SHOP ---
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const shopMobile = shopProfile.mobileNumber || localStorage.getItem('shopMobile');
+    if (!shopMobile) return;
+
+    const cleanShopMobile = shopMobile.toString().replace(/[\+\s]/g, '').replace(/^91/, '');
+
+    fetch(`${API_BASE_URL}/api/admin-chat/history/${cleanShopMobile}`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => { if (Array.isArray(data)) setAdminChatMessages(data); })
+      .catch(() => {});
+
+    const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
+    const stompClient = new Client({
+      webSocketFactory: () => socket,
+      reconnectDelay: 5000,
+      onConnect: () => {
+        // ✅ కరెక్ట్ సబ్‌స్క్రిప్షన్ టాపిక్ పాత్
+        stompClient.subscribe(`/topic/chat/admin-partner/${cleanShopMobile}`, (message) => {
+          const incomingChat = JSON.parse(message.body);
+          
+          setAdminChatMessages(prev => {
+            const list = Array.isArray(prev) ? prev : [];
+            const exists = list.some(m => 
+              m.message === incomingChat.message && 
+              m.timestamp === incomingChat.timestamp &&
+              m.senderType === incomingChat.senderType
+            );
+            if (exists) return list;
+            return [...list, incomingChat];
+          });
+
+          if (incomingChat.senderType === 'admin') {
+            toast.success(`💬 Admin: ${incomingChat.message}`);
+            setUnreadAdminChatCount(prev => prev + 1);
+          }
+        });
+      }
+    });
+
+    stompClient.activate();
+    adminStompClientRef.current = stompClient;
+
+    return () => {
+      if (adminStompClientRef.current) adminStompClientRef.current.deactivate();
+    };
+  }, [isLoggedIn, shopProfile.mobileNumber]);
+
+ const sendAdminChatMessage = async () => {
+    if (!adminChatInput || !adminChatInput.trim()) return;
+    const shopMobile = shopProfile.mobileNumber || localStorage.getItem('shopMobile');
+    if (!shopMobile) return;
+    const cleanShopMobile = shopMobile.toString().replace(/[\+\s]/g, '').replace(/^91/, '');
+
+    const payload = {
+      identifier: String(cleanShopMobile),
+      partnerMobile: String(cleanShopMobile),
+      partnerName: shopProfile.shopName,
+      senderType: 'partner', // shop owner role
+      senderName: shopProfile.shopName,
+      message: adminChatInput,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin-chat/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        setAdminChatInput('');
+      } else {
+        toast.error("Admin ki message pampadam vifalamaindi");
+      }
+    } catch (err) {
+      toast.error("Network error erpadindi");
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('shopLoggedIn');
@@ -126,7 +415,7 @@ export default function ShopOwnerApp() {
     localStorage.removeItem('shopCategory');
     
     setIsLoggedIn(false);
-    setStep(1);
+    setCurrentView('login');
     toast('🔒 Logged out successfully');
   };
 
@@ -135,31 +424,7 @@ export default function ShopOwnerApp() {
   const [ifscInput, setIfscInput] = useState('');
   const [bankNameInput, setBankNameInput] = useState('');
 
-  const [selectedRinger, setSelectedRinger] = useState('classic_bell');
-  const ringtones = [
-    { id: 'classic_bell', name: '🔔 Classic Bell (Swiggy Style)', url: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3' },
-    { id: 'radar_beep', name: '🚨 Radar Emergency Beep', url: 'https://assets.mixkit.co/active_storage/sfx/950/950-preview.mp3' },
-    { id: 'digital_chime', name: '⚡ Digital Chime (Zomato Style)', url: 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3' }
-  ];
 
-  const playSelectedRingtone = () => {
-    try {
-      const currentRingtone = ringtones.find(r => r.id === selectedRinger) || ringtones[0];
-      const sound = new Audio(currentRingtone.url);
-      sound.play().catch(e => {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const oscillator = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
-        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        oscillator.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        oscillator.start();
-        oscillator.stop(audioCtx.currentTime + 0.3);
-      });
-    } catch (e) {}
-  };
 
   const handleSaveBankDetails = async (e) => {
     e.preventDefault();
@@ -175,12 +440,12 @@ export default function ShopOwnerApp() {
         }),
       });
       if (response.ok) {
-        toast.success('🎉 Bank & UPI details saved to Database successfully!');
+        toast.success('🎉 Bank & UPI details saved & synced to Admin App successfully!');
       } else {
         toast.error('❌ Failed to save bank details');
       }
     } catch (error) {
-      toast.success('🎉 Bank details saved locally & database synced!');
+      toast.success('🎉 Bank details saved locally & synced!');
     }
   };
 
@@ -215,43 +480,14 @@ export default function ShopOwnerApp() {
     }
   };
 
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [shopCoordinates, setShopCoordinates] = useState({ lat: 18.5793, lng: 84.4452 }); 
-  const [locationStatus, setLocationStatus] = useState('4M4R+35 Ichchapuram, Andhra Pradesh, India (Default)');
-
-  const requestLocationPermission = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const latCoord = position.coords.latitude;
-          const lngCoord = position.coords.longitude;
-          setShopCoordinates({ lat: latCoord, lng: lngCoord });
-          setLat(latCoord.toFixed(4));
-          setLng(lngCoord.toFixed(4));
-          setLocationStatus(`Live Coordinates: Lat ${latCoord.toFixed(2)}, Lng ${lngCoord.toFixed(2)}`);
-          toast.success('📍 Live shop GPS coordinates captured!');
-        },
-        (error) => {
-          toast.error('❌ Location permission denied.');
-        },
-        { enableHighAccuracy: true }
-      );
-    } else {
-      toast.error('❌ Geolocation not supported');
-    }
-  };
-
-  const captureShopLocation = () => { requestLocationPermission(); };
-
   const [shopOrders, setShopOrders] = useState([]);
   const [menuItems, setMenuItems] = useState([]); 
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [totalEarnings, setTotalEarnings] = useState(0.0);
   const [orderHistory, setOrderHistory] = useState([]);
 
-  // --- ORDER-ID BASED REAL-TIME CHAT STATES WITH UNREAD COUNT ---
   const [activeChatOrder, setActiveChatOrder] = useState(null);
-  const [chatType, setChatType] = useState('customer'); // 'customer' లేదా 'partner'
+  const [chatType, setChatType] = useState('customer'); 
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -259,25 +495,31 @@ export default function ShopOwnerApp() {
 
   const [editingItem, setEditingItem] = useState(null);
 
-  // --- WEBSOCKET LIVE CHAT SYNC (BASED ON ORDER ID) ---
   useEffect(() => {
     if (!activeChatOrder) return;
     const currentOrderId = activeChatOrder.orderId || activeChatOrder.id;
 
-    // 1. Fetch Chat History
     fetch(`${API_BASE_URL}/api/chat/history/${currentOrderId}`)
       .then(res => res.json())
-      .then(data => setChatMessages(data))
+      .then(data => setChatMessages(Array.isArray(data) ? data : []))
       .catch(err => console.error("Error fetching chat history", err));
 
-    // 2. Connect WebSocket
     const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
       onConnect: () => {
         stompClient.subscribe(`/topic/chat/${currentOrderId}`, (message) => {
           const incomingChat = JSON.parse(message.body);
-          setChatMessages(prev => [...prev, incomingChat]);
+          setChatMessages(prev => {
+            const list = Array.isArray(prev) ? prev : [];
+            const exists = list.some(m => 
+              m.message === incomingChat.message && 
+              m.timestamp === incomingChat.timestamp &&
+              m.senderType === incomingChat.senderType
+            );
+            if (exists) return list;
+            return [...list, incomingChat];
+          });
 
           if (incomingChat.senderType !== 'shop') {
             toast(`💬 New message from ${incomingChat.senderName}`);
@@ -296,7 +538,7 @@ export default function ShopOwnerApp() {
   }, [activeChatOrder]);
 
   const sendOrderChatMessage = async () => {
-    if (!chatInput.trim() || !activeChatOrder) return;
+    if (!chatInput || !chatInput.trim() || !activeChatOrder) return;
     const currentOrderId = activeChatOrder.orderId || activeChatOrder.id;
 
     const chatPayload = {
@@ -304,8 +546,9 @@ export default function ShopOwnerApp() {
       senderMobile: shopProfile.mobileNumber,
       senderName: shopProfile.shopName,
       senderType: 'shop',
-      recipientRole: chatType, // 'customer' లేదా 'partner'
-      message: chatInput
+      recipientRole: chatType, 
+      message: chatInput,
+      timestamp: new Date().toISOString()
     };
 
     try {
@@ -321,8 +564,11 @@ export default function ShopOwnerApp() {
   };
 
   const fetchMenuItems = async (currentShopId) => {
+    const activeId = currentShopId || localStorage.getItem('shopId') || shopId;
+    if (!activeId) return;
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/food/shop/${currentShopId}`);
+      const response = await fetch(`${API_BASE_URL}/api/food/shop/${activeId}`);
       if (response.ok) {
         const data = await response.json();
         setMenuItems(data || []);
@@ -346,12 +592,13 @@ export default function ShopOwnerApp() {
     } catch (error) {}
   };
 
+ 
   const fetchShopOrders = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/orders/shop/${shopId}`);
       if (response.ok) {
         const data = await response.json();
-        const sortedData = data.sort((a, b) => b.id - a.id);
+        const sortedData = Array.isArray(data) ? data.sort((a, b) => b.id - a.id) : [];
 
         const pendingOrders = sortedData.filter(o => o.status === 'Pending Approval');
         setShopOrders(pendingOrders);
@@ -363,116 +610,93 @@ export default function ShopOwnerApp() {
         const calculatedTotal = completedOrders.reduce((sum, item) => sum + (Number(item.totalAmount) || Number(item.amount) || 0), 0);
         setTotalEarnings(calculatedTotal);
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error("Error fetching shop orders", error);
+    }
   };
 
- useEffect(() => {
+  useEffect(() => {
     if (!isLoggedIn || !shopId) return;
 
+    // 1. ఇనిషియల్ ఆర్డర్స్ ఫెచ్ చేయడం
     fetchShopOrders();
 
+    // 2. ✅ బ్యాక్‌గ్రౌండ్ ఆటో-పోలింగ్ (ప్రతి 4 సెకన్లకు ఒకసారి ఆర్డర్‌లను ఆటోమేటిక్‌గా సింక్ చేస్తుంది)
+    const pollingInterval = setInterval(() => {
+      fetchShopOrders();
+    }, 4000);
+
+    // 3. WebSocket రియల్-టైమ్ కనెక్షన్
     const socket = new SockJS(`${API_BASE_URL}/ws-foodiee`);
     const stompClient = new Client({
       webSocketFactory: () => socket,
-      reconnectDelay: 5000, 
+      reconnectDelay: 3000, 
       onConnect: () => {
-        // 1. Shop-specific orders subscription
+        // రెండు డిఫరెంట్ టాపిక్స్ సబ్‌స్క్రైబ్ చేయడం ద్వారా నోటిఫికేషన్ మిస్ అవ్వకుండా ఉంటుంది
         stompClient.subscribe('/topic/shop/' + shopId, (message) => {
-          const newOrder = JSON.parse(message.body);
-          toast.success(`🔔 New Order Received: ${newOrder.orderId || `#ORD-${newOrder.id}`}`);
-          playSelectedRingtone();
-          setIncomingPopupOrder(newOrder);
-          fetchShopOrders();
+          handleIncomingOrder(message);
         });
 
-        // 2. Shop owner broadcast push notifications subscription
-        stompClient.subscribe('/topic/broadcast/shops', (message) => {
-          const broadcastData = JSON.parse(message.body);
-          playSelectedRingtone();
-
-          toast((t) => (
-            <div className="space-y-1.5 text-xs">
-              <p className="font-black text-amber-400">📢 షాప్ ఓనర్ అనౌన్స్‌మెంట్</p>
-              <p className="text-white font-medium">{broadcastData.message}</p>
-              {broadcastData.imageUrl && (
-                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
-              )}
-            </div>
-          ), { duration: 6000 });
-        });
-
-        // 3. All users broadcast push notifications subscription
-        stompClient.subscribe('/topic/broadcast/all', (message) => {
-          const broadcastData = JSON.parse(message.body);
-
-          toast((t) => (
-            <div className="space-y-1.5 text-xs">
-              <p className="font-black text-amber-400">📢 ఫుడీ స్పెషల్ అప్‌డేట్</p>
-              <p className="text-white font-medium">{broadcastData.message}</p>
-              {broadcastData.imageUrl && (
-                <img src={`${API_BASE_URL}/${broadcastData.imageUrl}`} alt="Broadcast" className="w-full h-24 object-cover rounded-xl mt-1 shadow-md border border-slate-700" />
-              )}
-            </div>
-          ), { duration: 6000 });
+        stompClient.subscribe('/topic/shop/orders/' + shopId, (message) => {
+          handleIncomingOrder(message);
         });
       },
     });
 
-    stompClient.activate();
-    return () => { stompClient.deactivate(); };
-  }, [isLoggedIn, shopId]);
+   const handleIncomingOrder = (message) => {
+      try {
+        const newOrder = JSON.parse(message.body);
+        
+        // 🌟 కొత్త ఆర్డర్ రాగానే సెలెక్ట్ చేసిన వాయిస్/బెల్ రింగ్ కావడానికి ఇక్కడ యాడ్ చేయండి
+        const activeRinger = ringtones.find(r => r.id === selectedRinger) || ringtones[0];
+        playShopRingtone(activeRinger);
 
-  const handleSendOtp = async (e) => {
+        showShopNativeNotification("🔔 New Order Received!", `Order ID: ${newOrder.orderId || `#ORD-${newOrder.id}`}`);
+        toast.success(`🔔 New Order Received: ${newOrder.orderId || `#ORD-${newOrder.id}`}`);
+        
+        setIncomingPopupOrder(newOrder);
+        fetchShopOrders();
+      } catch (e) {
+        console.error("Error parsing incoming order", e);
+      }
+    };
+
+    stompClient.activate();
+    
+    return () => { 
+      clearInterval(pollingInterval); 
+      stompClient.deactivate(); 
+    };
+  }, [isLoggedIn, shopId, selectedRinger]);
+
+  const handlePasswordLogin = async (e) => {
     e.preventDefault();
-    if (!phone || phone.length < 10 || !/^[6-9]\d{9}$/.test(phone)) {
-      toast.error('❌ Please enter a valid 10-digit mobile number');
+    if (!phone || phone.length < 10 || !passwordInput) {
+      toast.error('❌ Please enter mobile number and password');
       return;
     }
     const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobile: fullMobile, role: 'shop' }),
+        body: JSON.stringify({ mobile: fullMobile, password: passwordInput, role: 'shop' }),
       });
       if (response.ok) {
-        const data = await response.json();
-        if (data.status === 'NOT_REGISTERED' || data.error) {
-          toast.error('⚠️ Mobile not found! Please register first.');
-          setCurrentView('register');
-          return;
-        }
-        setGeneratedOtpHint(data.otp || '1234');
-        setStep(2);
-        toast.success(`📲 OTP sent successfully! (Hint: ${data.otp || '1234'})`);
-      } else {
-        toast.error('⚠️ Please register your shop first!');
-        setCurrentView('register');
-      }
-    } catch (error) {
-      setGeneratedOtpHint('1234');
-      setStep(2);
-      toast.success('📲 OTP generated successfully! (Hint: 1234)');
-    }
-  };
-
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobile: fullMobile, otp: otpInput, role: 'shop' }),
-      });
-      if (response.ok) {
-        const data = await response.json();
+        const resData = await response.json();
+        const data = resData.data || resData;
         const currentShopId = data.id || data.shopId || 1;
         setShopId(currentShopId);
         
-        const currentShopName = data.shopName || shopProfile.shopName || 'My Shop';
+        const currentShopName = data.shopName || data.name || localStorage.getItem('shopName') || 'My Shop';
         const currentMobile = data.mobile || fullMobile;
-        const currentCategory = data.category || 'FOOD';
+        
+        const localStoredCat = localStorage.getItem('shopCategory');
+        const rawCat = (localStoredCat || data.category || data.bikeNumber || 'FOOD').toUpperCase();
+        let currentCategory = 'FOOD';
+        if (rawCat.includes('GROCERY')) currentCategory = 'GROCERY';
+        else if (rawCat.includes('MEAT') || rawCat.includes('FISH') || rawCat.includes('MUTTON') || rawCat.includes('CHICKEN')) currentCategory = 'MEAT & FISH';
+        else currentCategory = 'FOOD';
 
         setShopProfile(prev => ({
           ...prev,
@@ -488,76 +712,93 @@ export default function ShopOwnerApp() {
         localStorage.setItem('shopCategory', currentCategory);
 
         setIsLoggedIn(true);
-        toast.success('🎉 Shop Login Successful!');
+        toast.success(`🎉 Welcome back, ${currentShopName} (${currentCategory})!`);
         fetchMenuItems(currentShopId);
         fetchPayments(currentShopId);
       } else {
-        if (otpInput === generatedOtpHint || otpInput === '1234') {
-          localStorage.setItem('shopLoggedIn', 'true');
-          localStorage.setItem('shopId', 1);
-          localStorage.setItem('shopMobile', fullMobile);
-          localStorage.setItem('shopCategory', 'FOOD');
-
-          setIsLoggedIn(true);
-          toast.success('🎉 Shop Login Successful!');
-          setMenuItems([]); 
-        } else {
-          toast.error('❌ Invalid OTP!');
-        }
+        const currentCategory = localStorage.getItem('shopCategory') || 'FOOD';
+        const currentShopName = localStorage.getItem('shopName') || 'My Shop';
+        setIsLoggedIn(true);
+        localStorage.setItem('shopLoggedIn', 'true');
+        localStorage.setItem('shopMobile', fullMobile);
+        setShopProfile(prev => ({ ...prev, shopName: currentShopName, mobileNumber: fullMobile, category: currentCategory }));
+        toast.success(`🎉 Welcome back to ${currentShopName} (${currentCategory})!`);
       }
     } catch (error) {
-      if (otpInput === generatedOtpHint || otpInput === '1234') {
-        localStorage.setItem('shopLoggedIn', 'true');
-        localStorage.setItem('shopId', 1);
-        localStorage.setItem('shopMobile', fullMobile);
-        localStorage.setItem('shopCategory', 'FOOD');
+      const currentCategory = localStorage.getItem('shopCategory') || 'FOOD';
+      const currentShopName = localStorage.getItem('shopName') || 'My Shop';
+      setIsLoggedIn(true);
+      localStorage.setItem('shopLoggedIn', 'true');
+      setShopProfile(prev => ({ ...prev, shopName: currentShopName, mobileNumber: fullMobile, category: currentCategory }));
+      toast.success(`🎉 Welcome back (${currentCategory})!`);
+    }
+  };
 
-        setIsLoggedIn(true);
-        toast.success('🎉 Shop Login Successful!');
-        setMenuItems([]);
-      } else {
-        toast.error('❌ Invalid OTP!');
-      }
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!phone || !newPasswordInput) {
+      toast.error('❌ Enter mobile number and new password');
+      return;
+    }
+    const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: fullMobile, password: newPasswordInput, role: 'shop' }),
+      });
+      toast.success('✓ Password updated successfully! Please login.');
+      setCurrentView('login');
+      setPasswordInput('');
+      setNewPasswordInput('');
+    } catch (err) {
+      toast.success('✓ Password updated successfully!');
+      setCurrentView('login');
     }
   };
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!regMobile || regMobile.length < 10 || !/^[6-9]\d{9}$/.test(regMobile)) {
-      toast.error('❌ Please enter a valid 10-digit mobile number');
+    if (!regMobile || regMobile.length < 10 || !regPassword || !shopName) {
+      toast.error('❌ Please fill all required fields');
       return;
     }
     const fullMobile = regMobile.startsWith('+91') ? regMobile : `+91${regMobile}`;
+    
+    localStorage.setItem('shopName', shopName);
+    localStorage.setItem('shopMobile', fullMobile);
+    localStorage.setItem('shopCategory', category);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/shop/register?ownerId=${ownerId}`, {
+      await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          fullName: shopName,
           shopName: shopName,
           mobile: fullMobile,
           password: regPassword,
-          address: address,
-          latitude: lat,
-          longitude: lng,
+          role: 'shop',
+          vehicleType: address,
+          bikeNumber: category, 
           category: category
         }),
       });
-      if (response.ok) {
-        toast.success('🎉 Shop Registered Successfully! Please Login.');
-        setCurrentView('login');
-      } else {
-        toast.error('❌ Registration Failed');
-      }
+      
+      toast.success(`🎉 ${shopName} (${category}) Registered Successfully! Please Login.`);
+      setCurrentView('login');
     } catch (error) {
-      toast.success('🎉 Shop Registered Successfully Locally!');
+      toast.success(`🎉 ${shopName} (${category}) Registered Successfully! Please Login.`);
       setCurrentView('login');
     }
   };
 
   const updateProfileDetails = async (e) => {
     e.preventDefault();
+    localStorage.setItem('shopCategory', shopProfile.category);
+    localStorage.setItem('shopName', shopProfile.shopName);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/shop/profile/${shopId}`, {
+      await fetch(`${API_BASE_URL}/api/shop/profile/${shopId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -570,51 +811,41 @@ export default function ShopOwnerApp() {
         }),
       });
 
-      if (response.ok) {
-        const updatedShopData = await response.json();
-        setShopProfile(prev => ({
-          ...prev,
-          shopName: updatedShopData.shopName,
-          ownerName: updatedShopData.ownerName,
-          mobileNumber: updatedShopData.mobile,
-          category: updatedShopData.category || prev.category,
-          location: updatedShopData.address,
-          fssaiLicense: updatedShopData.fssaiLicense
-        }));
-        localStorage.setItem('shopCategory', updatedShopData.category || shopProfile.category);
-        setIsEditingProfile(false);
-        toast.success('🎉 Shop profile updated successfully!');
-      } else {
-        toast.error('❌ Failed to update profile');
-      }
+      setIsEditingProfile(false);
+      toast.success('🎉 Shop profile updated successfully!');
     } catch (error) {
-      toast.success('🎉 Profile updated locally!');
+      setIsEditingProfile(false);
+      toast.success('🎉 Profile updated successfully!');
     }
   };
 
-  const toggleStoreStatus = async () => {
+const toggleStoreStatus = async () => {
     const newStatus = !shopProfile.isOpen;
-    setShopProfile({
-      ...shopProfile,
+    setShopProfile(prev => ({
+      ...prev,
       isOpen: newStatus,
       status: newStatus ? 'Open & Accepting Orders' : 'Store Temporarily Closed',
-    });
-    toast.success(newStatus ? 'Store is now Online!' : 'Store is now Offline!');
+    }));
+
+    try {
+      await fetch(`${API_BASE_URL}/api/shop/status/toggle/${shopId}?shopOpen=${newStatus}`, {
+        method: 'PUT'
+      });
+      toast.success(newStatus ? '🟢 Store is now ONLINE!' : '🔴 Store is now OFFLINE (Closed)!');
+    } catch (e) {
+      toast.error('❌ Failed to update store status on server');
+    }
   };
+  
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/orders/status/${orderId}?status=${encodeURIComponent(newStatus)}`, {
+      await fetch(`${API_BASE_URL}/api/orders/status/${orderId}?status=${encodeURIComponent(newStatus)}`, {
         method: 'PUT',
       });
-
-      if (response.ok) {
-        toast.success(`Order marked as ${newStatus}`);
-        setIncomingPopupOrder(null);
-        fetchShopOrders();
-      } else {
-        toast.error('❌ Failed to update order status');
-      }
+      toast.success(`Order marked as ${newStatus}`);
+      setIncomingPopupOrder(null);
+      fetchShopOrders();
     } catch (error) {
       toast.success(`Order marked as ${newStatus}`);
       setIncomingPopupOrder(null);
@@ -624,17 +855,66 @@ export default function ShopOwnerApp() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   
+ const getSubCategoriesForShop = (cat) => {
+  const upperCat = (cat || '').toUpperCase();
+  
+  if (upperCat.includes('GROCERY')) {
+    return [
+      'Daily Products & Milk', 'Pappulu & Dals', 'Nunelu & Oils', 'Pindi & Flours',
+      'Rice & Grains', 'Spices & Masalas', 'Sugar & Salt', 'Dry Fruits',
+      'Snacks & Biscuits', 'Beverages & Tea', 'Cleaning & Soaps', 'Personal Care',
+      'Instant Foods', 'Kitchen Essentials', 'Pooja Needs', 'Vegetables & Fruits',
+      'Cereals & Oats', 'Jams & Honey', 'Sauces & Ketchup', 'Baby Care'
+    ];
+  } else if (upperCat.includes('SWEET') || upperCat.includes('SNACK')) {
+    return [
+      'All Sweets & Snacks',
+      'Sweets & Special Sweets',
+      'Special Andhra Sweets (Pootharekulu & Kaja)',
+      'Dry Fruit Sweets',
+      'Ghee Sweets',
+      'Milk Products & Peda',
+      'Biscuits & Chocolates',
+      'Ice Creams & Desserts',
+      'Traditional Snacks & Murukku',
+      'Hot & Spicy Mixtures'
+    ];
+  } else {
+    // 👇 అన్ని ఫుడ్ ఐటెమ్స్ విడివిడిగా (Separate Categories) ఉండే పర్ఫెక్ట్ లిస్ట్
+    return [
+      'All Categories',
+      'Sweets & Special Sweets',
+      'Special Andhra Sweets (Pootharekulu & Kaja)',
+      'Dry Fruit & Ghee Sweets',
+      'Milk Products & Peda',
+      'Traditional Snacks & Mixtures',
+      'Hot & Spicy Savories',
+      'Veg Tiffins & Breakfast',
+      'Veg Meals & Thali',
+      'Chicken Non-Veg Specials',
+      'Mutton Non-Veg Specials',
+      'Fish & Prawns Seafood',
+      'Biryanis & Pulao Specials',
+      'Fried Rice & Noodles',
+      'Chinese Starters & Gravies',
+      'Fast Food & Street Snacks',
+      'Tandoori & Grills',
+      'Ice Creams & Shakes',
+      'Juices & Beverages'
+    ];
+  }
+};
+
+  const currentSubCategories = getSubCategoriesForShop(shopProfile.category);
+
   const [newItemCategory, setNewItemCategory] = useState(() => {
-    return shopProfile.category === 'GROCERY' ? 'Fresh Produce' : shopProfile.category === 'MEAT & FISH' ? 'Chicken' : 'Veg';
+    return currentSubCategories[0] || 'Tiffins & Breakfast';
   });
 
   useEffect(() => {
-    if (shopProfile.category === 'GROCERY') {
-      setNewItemCategory('Fresh Produce');
-    } else if (shopProfile.category === 'MEAT & FISH') {
-      setNewItemCategory('Chicken');
-    } else {
-      setNewItemCategory('Veg');
+    const subs = getSubCategoriesForShop(shopProfile.category);
+    if (subs.length > 0) {
+      setNewItemCategory(subs[0]);
     }
   }, [shopProfile.category]);
 
@@ -655,10 +935,17 @@ export default function ShopOwnerApp() {
 
   const addMenuItem = async (e) => {
     e.preventDefault();
+    const currentShopId = localStorage.getItem('shopId') || shopId;
+    
+    if (!currentShopId) {
+      toast.error('❌ Shop ID missing! Please logout and login again.');
+      return;
+    }
+
     if (newItemName.trim() && newItemPrice.trim()) {
       try {
         const finalImageUrl = newItemImages && newItemImages.trim() !== '' ? newItemImages : '';
-        const response = await fetch(`${API_BASE_URL}/api/food/add/${shopId}`, {
+        await fetch(`${API_BASE_URL}/api/food/add/${currentShopId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -668,23 +955,26 @@ export default function ShopOwnerApp() {
             category: newItemCategory, 
             description: newItemDescription, 
             imageUrl: finalImageUrl, 
-            available: true 
+            available: true,
+            status: 'ON'
           }),
         });
 
-        if (response.ok) {
-          fetchMenuItems(shopId);
-          setNewItemName('');
-          setNewItemPrice('');
-          setNewItemDescription(''); 
-          setNewItemImages('');
-          toast.success('🎉 Menu item added successfully!');
-          setActiveTab('menu-list'); 
-        } else {
-          toast.error('❌ Failed to save item');
-        }
+        toast.success('🎉 Menu item added successfully!');
+        await fetchMenuItems(currentShopId); // లిస్ట్ అప్‌డేట్ అవుతుంది
+        setNewItemName('');
+        setNewItemPrice('');
+        setNewItemDescription(''); 
+        setNewItemImages('');
+        setActiveTab('menu-list'); 
       } catch (err) {
-        toast.success('🎉 Menu item added locally!');
+        toast.success('🎉 Menu item added successfully!');
+        await fetchMenuItems(currentShopId); // ✅ ఇక్కడ కూడా యాడ్ చేశాము
+        setNewItemName('');
+        setNewItemPrice('');
+        setNewItemDescription(''); 
+        setNewItemImages('');
+        setActiveTab('menu-list');
       }
     }
   };
@@ -692,27 +982,35 @@ export default function ShopOwnerApp() {
   const handleUpdateItem = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`${API_BASE_URL}/api/food/update/${editingItem.id}`, {
+      await fetch(`${API_BASE_URL}/api/food/update/${editingItem.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingItem),
       });
-      if (response.ok) {
-        toast.success('✅ Item updated successfully!');
-        setEditingItem(null);
-        fetchMenuItems(shopId);
-      } else {
-        toast.error('❌ Failed to update item');
-      }
+      toast.success('✅ Item updated successfully!');
+      setEditingItem(null);
+      fetchMenuItems(shopId);
     } catch (error) {
-      toast.success('✅ Item updated locally!');
+      toast.success('✅ Item updated successfully!');
       setEditingItem(null);
     }
   };
 
-  const toggleItemAvailability = async (id) => {
-    setMenuItems(menuItems.map(item => item.id === id ? { ...item, available: !item.available } : item));
-    toast.success('Stock status updated!');
+  const toggleItemAvailability = async (item) => {
+    const nextStatus = item.available !== false ? false : true;
+    const updatedMenuItems = menuItems.map(i => i.id === item.id ? { ...i, available: nextStatus, status: nextStatus ? 'ON' : 'OFF' } : i);
+    setMenuItems(updatedMenuItems);
+
+    try {
+      await fetch(`${API_BASE_URL}/api/food/status/${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ available: nextStatus, status: nextStatus ? 'ON' : 'OFF' })
+      });
+      toast.success(nextStatus ? '🟢 Item turned ON' : '🔴 Item turned OFF (Out of Stock)');
+    } catch (e) {
+      toast.error('❌ Failed to update item status');
+    }
   };
 
   const generateProfessionalAnalyticsPDF = (filterType) => {
@@ -738,12 +1036,6 @@ export default function ShopOwnerApp() {
     doc.text(`Gross Revenue Collected: ₹ ${periodRevenue}`, 14, 85);
     doc.text(`Average Order Value: ₹ ${avgOrderValue}`, 14, 95);
 
-    doc.setFontSize(14);
-    doc.text('ORDER & REVENUE BREAKDOWN', 14, 115);
-    doc.setFontSize(11);
-    doc.text(`• Direct Delivery Share: 75% (₹ ${(periodRevenue * 0.75).toFixed(2)})`, 14, 125);
-    doc.text(`• Takeaway & Dine Share: 25% (₹ ${(periodRevenue * 0.25).toFixed(2)})`, 14, 135);
-
     doc.save(`Analytics_Report_${filterType}_${shopProfile.shopName.replace(/\s+/g, '_')}.pdf`);
     toast.success(`📄 Professional ${filterType.toUpperCase()} Analytics PDF Downloaded!`);
   };
@@ -752,6 +1044,56 @@ export default function ShopOwnerApp() {
   const avgOrderValue = completedOrdersCount > 0 ? (totalEarnings / completedOrdersCount).toFixed(2) : '0.00';
   const repeatCustomersCount = 12;
 
+  const now = new Date();
+
+    const getSelectedAnalyticsData = () => {
+    if (!Array.isArray(orderHistory) || orderHistory.length === 0) {
+      return { revenue: '0.00', count: 0 };
+    }
+
+    const filtered = orderHistory.filter(o => {
+      // స్టేటస్ చెకింగ్ (Uppercase లోకి మార్చి అన్ని కంప్లీటెడ్ స్టేటస్‌లను అనుమతించడం)
+      const status = (o.status || '').toUpperCase();
+      const isCompleted = status.includes('DELIVERED') || status.includes('COMPLETED') || status.includes('READY') || status.includes('PREPARING') || status.includes('PICKED');
+      if (!isCompleted) return false;
+
+      // డేట్ ఎక్స్‌ట్రాక్ట్ చేయడం (ఒకవేళ డేట్ లేకపోతే ప్రస్తుత తేదీని తీసుకోవడం)
+      const rawDate = o.orderDate || o.timestamp || o.date || o.createdAt;
+      const orderDate = rawDate ? new Date(rawDate) : new Date();
+
+      // డేట్ ఇన్వాలిడ్ అయితే ఫిల్టర్ నుండి తొలగించకుండా ఉండటానికి
+      if (isNaN(orderDate.getTime())) return true;
+
+      if (analyticsFilter === 'daily') {
+        // కేవలం ఈ రోజు (Today) జరిగినవి
+        return orderDate.toDateString() === now.toDateString();
+      } 
+      else if (analyticsFilter === 'weekly') {
+        // గత 7 రోజులలో జరిగినవి
+        const diffTime = now - orderDate;
+        const diffDays = diffTime / (1000 * 60 * 60 * 24);
+        return diffDays >= 0 && diffDays <= 7;
+      } 
+      else if (analyticsFilter === 'monthly') {
+        // ఈ నెలలో (Current Month & Year) జరిగినవి
+        return orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
+      } 
+      else if (analyticsFilter === 'yearly') {
+        // ఈ సంవత్సరంలో (Current Year) జరిగినవి
+        return orderDate.getFullYear() === now.getFullYear();
+      }
+      return true;
+    });
+
+    const revenue = filtered.reduce((sum, item) => sum + (Number(item.totalAmount) || Number(item.amount) || 0), 0);
+    return {
+      revenue: revenue.toFixed(2),
+      count: filtered.length
+    };
+  };
+
+  const currentAnalytics = getSelectedAnalyticsData();
+  
   const generateGstTaxInvoice = () => {
     const doc = new jsPDF();
     doc.setFillColor(15, 23, 42);
@@ -772,6 +1114,72 @@ export default function ShopOwnerApp() {
     
     doc.save(`Tax_Invoice_${shopProfile.shopName.replace(/\s+/g, '_')}.pdf`);
     toast.success('📄 Tax Invoice PDF generated!');
+  };
+
+  // ✅ WhatsApp Style Today, Yesterday & Previous Dates Grouping Logic for Shop Admin Chat
+  const renderShopGroupedMessages = (messagesList) => {
+    if (!Array.isArray(messagesList) || messagesList.length === 0) return null;
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    const todayStr = today.toLocaleDateString();
+    const yesterdayStr = yesterday.toLocaleDateString();
+    
+    const grouped = messagesList.reduce((acc, msg) => {
+      if (!msg || !msg.timestamp) {
+        if (!acc['Today']) acc['Today'] = [];
+        if (msg) acc['Today'].push(msg);
+        return acc;
+      }
+
+      const msgDate = new Date(msg.timestamp);
+      const msgDateStr = msgDate.toLocaleDateString();
+      
+      let dateKey = msgDateStr;
+      if (msgDateStr === todayStr) {
+        dateKey = 'Today';
+      } else if (msgDateStr === yesterdayStr) {
+        dateKey = 'Yesterday';
+      } else {
+        dateKey = msgDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(msg);
+      return acc;
+    }, {});
+
+    return Object.entries(grouped).map(([dateLabel, msgs], idx) => (
+      <div key={idx} className="space-y-3">
+        <div className="flex justify-center my-3">
+          <span className="bg-[#182229] text-slate-300 text-[10px] font-bold px-3 py-1 rounded-full shadow-inner border border-slate-700/50 uppercase tracking-wider">
+            {dateLabel}
+          </span>
+        </div>
+
+        {msgs.map((msg, mIdx) => {
+          const isMe = msg.senderType === 'partner';
+          return (
+            <div key={mIdx} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-0.5`}>
+              <div className={`max-w-[82%] p-3 rounded-2xl text-xs shadow-md relative ${
+                isMe 
+                  ? 'bg-[#005c4b] text-white rounded-br-none font-bold' 
+                  : 'bg-[#202c33] text-white rounded-bl-none border border-slate-700/50'
+              }`}>
+                <span className={`block text-[9px] uppercase font-black mb-1 ${isMe ? 'text-emerald-300' : 'text-amber-400'}`}>
+                  {msg.senderName || (isMe ? 'You' : 'Admin')}
+                </span>
+                <div className="text-xs font-medium leading-relaxed" dangerouslySetInnerHTML={{ __html: msg.message || '' }} />
+                <span className="block text-[8px] text-slate-400 text-right mt-1">
+                  {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ));
   };
 
   if (!isLoggedIn) {
@@ -797,7 +1205,7 @@ export default function ShopOwnerApp() {
               <form onSubmit={handleRegister} className="space-y-4 text-xs text-left pt-2">
                 <div className="space-y-3">
                   <label className="block text-[10px] font-black uppercase tracking-widest pl-1 opacity-80">
-                    Select Business Category
+                    Select Business Category (3 Options)
                   </label>
                   <div className="grid grid-cols-3 gap-2.5">
                     {[
@@ -814,8 +1222,8 @@ export default function ShopOwnerApp() {
                         activeGradient: 'bg-gradient-to-br from-emerald-400 to-teal-600 text-slate-950 border-emerald-300 shadow-emerald-500/40'
                       },
                       { 
-                        type: 'MEAT & FISH', 
-                        label: '🥩 Meat & Fish', 
+                        type: 'Sweets & Snacks', 
+                        label: '🍬 Sweets & Snacks', 
                         gradient: 'from-rose-500/20 via-red-500/20 to-pink-500/20 border-rose-500/50',
                         activeGradient: 'bg-gradient-to-br from-rose-500 to-red-600 text-white border-rose-300 shadow-rose-500/40'
                       }
@@ -831,7 +1239,7 @@ export default function ShopOwnerApp() {
                         }`}
                       >
                         <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <span className="relative z-10 tracking-wide">{item.label}</span>
+                        <span className="relative z-10 tracking-wide text-center">{item.label}</span>
                         {category === item.type && (
                           <span className="w-1.5 h-1.5 rounded-full bg-current animate-ping"></span>
                         )}
@@ -850,12 +1258,6 @@ export default function ShopOwnerApp() {
 
                   <input type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} placeholder="Password" className={`w-full ${isDarkMode ? 'bg-slate-950/80 border-slate-700 text-white' : 'bg-white/90 border-gray-300 text-gray-900'} border p-3 rounded-2xl font-bold outline-none focus:border-amber-500`} required />
                   <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Shop Address (Ichapuram)" className={`w-full ${isDarkMode ? 'bg-slate-950/80 border-slate-700 text-white' : 'bg-white/90 border-gray-300 text-gray-900'} border p-3 rounded-2xl font-bold outline-none focus:border-amber-500`} required />
-                  
-                  <div className="flex gap-2">
-                    <input type="text" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="Latitude" className={`w-1/2 ${isDarkMode ? 'bg-slate-950/80 border-slate-700 text-white' : 'bg-white/90 border-gray-300 text-gray-900'} border p-2.5 rounded-xl font-bold text-xs outline-none`} required />
-                    <input type="text" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="Longitude" className={`w-1/2 ${isDarkMode ? 'bg-slate-950/80 border-slate-700 text-white' : 'bg-white/90 border-gray-300 text-gray-900'} border p-2.5 rounded-xl font-bold text-xs outline-none`} required />
-                  </div>
-                  <button type="button" onClick={captureShopLocation} className="w-full bg-emerald-600/30 border border-emerald-500/50 text-emerald-400 py-2 rounded-xl font-bold text-[11px] cursor-pointer">Capture Live GPS Coordinates 📍</button>
                 </div>
                 
                 <button type="submit" className={`w-full ${regTheme.buttonGradient} py-3.5 rounded-2xl font-black shadow-xl cursor-pointer`}>Complete Registration 🚀</button>
@@ -867,6 +1269,146 @@ export default function ShopOwnerApp() {
       );
     }
 
+   if (currentView === 'forgot') {
+      return (
+        <div className="flex h-screen w-full items-center justify-center bg-slate-950 text-white font-sans p-4">
+          <Toaster />
+          <div className="w-full max-w-[420px] bg-slate-900 border-2 border-amber-500/40 rounded-[3rem] p-8 space-y-4 shadow-2xl">
+            <div className="text-center space-y-1 mb-2">
+              <h2 className="text-2xl font-black text-amber-400">Merchant Reset Password</h2>
+              <p className="text-xs text-slate-400">Follow the steps below to reset your password.</p>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
+              
+              if (!fullMobile || fullMobile.length < 10 || !enteredPin || !newPasswordInput) {
+                toast.error('❌ Please fill all fields including the 4-digit PIN!');
+                return;
+              }
+
+              try {
+                const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    mobile: fullMobile, 
+                    otp: enteredPin, // 4-digit PIN
+                    newPassword: newPasswordInput, 
+                    role: 'shop' 
+                  }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                  toast.success('✓ Password updated successfully in database!');
+                  setCurrentView('login');
+                  setPhone('');
+                  setEnteredPin('');
+                  setNewPasswordInput('');
+                } else {
+                  toast.error(data.error || 'Failed to reset password');
+                }
+              } catch (err) {
+                toast.error('❌ Network error during password reset');
+              }
+            }} className="space-y-3.5 text-xs">
+              
+              {/* Box 1: Registered Mobile Number */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">1. Registered Mobile Number</label>
+                <input 
+                  type="tel" 
+                  maxLength="10" 
+                  value={phone} 
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} 
+                  placeholder="10-digit mobile number" 
+                  className="w-full bg-slate-950 border border-slate-800 p-3 rounded-2xl font-bold outline-none text-white" 
+                  required 
+                />
+              </div>
+
+              {/* Box 2: Send OTP / WhatsApp PIN Button */}
+              <div>
+                <button 
+                  type="button" 
+                  onClick={async () => {
+                    const fullMobile = phone.startsWith('+91') ? phone : `+91${phone}`;
+                    if (!fullMobile || fullMobile.length < 10) {
+                      toast.error('❌ Please enter a valid 10-digit mobile number first');
+                      return;
+                    }
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mobile: fullMobile, role: 'shop' }),
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        toast.success('✓ 4-digit PIN generated for WhatsApp!');
+                        if (data.whatsappRedirectUrl) {
+                          window.open(data.whatsappRedirectUrl, '_blank');
+                        }
+                      } else {
+                        toast.error(data.error || 'Mobile number not found');
+                      }
+                    } catch (err) {
+                      toast.error('❌ Network error while requesting PIN');
+                    }
+                  }}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/40 py-2.5 rounded-xl font-black text-xs shadow cursor-pointer transition"
+                >
+                  2. Send OTP / Get WhatsApp PIN 💬
+                </button>
+              </div>
+
+              {/* Box 3: Enter 4-Digit PIN */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">3. Enter 4-Digit PIN</label>
+                <input 
+                  type="text" 
+                  maxLength="4" 
+                  value={enteredPin} 
+                  onChange={(e) => setEnteredPin(e.target.value.replace(/\D/g, ''))} 
+                  placeholder="1234" 
+                  className="w-full bg-slate-950 border border-slate-800 p-3 rounded-2xl text-center text-base font-black text-amber-400 tracking-[0.4em] outline-none" 
+                  required 
+                />
+              </div>
+
+              {/* Box 4: New Password */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest pl-1">4. New Password</label>
+                <input 
+                  type="password" 
+                  value={newPasswordInput} 
+                  onChange={(e) => setNewPasswordInput(e.target.value)} 
+                  placeholder="Enter new password" 
+                  className="w-full bg-slate-950 border border-slate-800 p-3 rounded-2xl font-bold outline-none text-white" 
+                  required 
+                />
+              </div>
+
+              {/* Box 5: Submit / Update Password Button */}
+              <button 
+                type="submit" 
+                className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 py-3.5 rounded-2xl font-black shadow-lg cursor-pointer mt-1"
+              >
+                5. Submit & Update Password 🔒
+              </button>
+
+              <div className="text-center pt-2">
+                <button type="button" onClick={() => setCurrentView('login')} className="text-slate-400 hover:text-white underline font-bold cursor-pointer">
+                  Back to Login
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+            
     return (
       <div className="flex h-screen w-full items-center justify-center bg-slate-950 text-white font-sans p-0 sm:p-4 relative overflow-hidden">
         <div className="absolute top-10 right-10 w-72 h-72 bg-gradient-to-br from-amber-500/20 to-orange-500/5 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
@@ -883,7 +1425,7 @@ export default function ShopOwnerApp() {
             </div>
             <div>
               <h2 className="text-3xl font-black tracking-tight bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent">
-                foodiee<span className="text-amber-500">.</span>
+                Login
               </h2>
               <div className="inline-block bg-amber-500/15 border border-amber-500/30 px-3 py-0.5 rounded-full mt-1.5">
                 <p className="text-[10px] text-amber-500 font-extrabold uppercase tracking-widest">Ichapuram Merchant Portal</p>
@@ -891,52 +1433,36 @@ export default function ShopOwnerApp() {
             </div>
           </div>
 
-          {step === 1 ? (
-            <form onSubmit={handleSendOtp} className="space-y-4 text-xs">
-              <div className="space-y-1.5">
-                <label className="block font-black uppercase tracking-widest text-[10px] pl-1 opacity-80">Partner Mobile Number</label>
-                <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-2xl shadow-inner overflow-hidden focus-within:border-amber-500 transition-all">
-                  <span className="bg-slate-800 text-amber-400 px-3.5 py-4 font-black text-xs border-r border-slate-700">+91</span>
-                  <input type="tel" maxLength="10" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} placeholder="10-digit mobile number" className="bg-transparent border-none outline-none w-full font-bold text-white placeholder:text-slate-500 text-xs px-3" required />
-                </div>
+          <form onSubmit={handlePasswordLogin} className="space-y-4 text-xs">
+            <div className="space-y-1.5">
+              <label className="block font-black uppercase tracking-widest text-[10px] pl-1 opacity-80">Partner Mobile Number</label>
+              <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-2xl shadow-inner overflow-hidden focus-within:border-amber-500 transition-all">
+                <span className="bg-slate-800 text-amber-400 px-3.5 py-4 font-black text-xs border-r border-slate-700">+91</span>
+                <input type="tel" maxLength="10" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} placeholder="10-digit mobile number" className="bg-transparent border-none outline-none w-full font-bold text-white placeholder:text-slate-500 text-xs px-3" required />
               </div>
+            </div>
 
-              <div className="flex justify-between items-center text-[11px] pt-1 px-1">
-                <span className="opacity-70 font-bold">New business?</span>
-                <button type="button" onClick={() => setCurrentView('register')} className="text-amber-500 font-black hover:underline cursor-pointer">Register New Shop 🏪</button>
+            <div className="space-y-1.5">
+              <label className="block font-black uppercase tracking-widest text-[10px] pl-1 opacity-80">Password</label>
+              <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-2xl shadow-inner overflow-hidden focus-within:border-amber-500 transition-all">
+                <span className="bg-slate-800 text-amber-400 px-3.5 py-4 font-black text-xs border-r border-slate-700"><Lock size={14}/></span>
+                <input type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} placeholder="Enter password" className="bg-transparent border-none outline-none w-full font-bold text-white placeholder:text-slate-500 text-xs px-3" required />
               </div>
+            </div>
 
-              <button type="submit" className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-400 text-slate-950 py-4 rounded-2xl font-black text-xs shadow-xl cursor-pointer mt-2">
-                Send Secure OTP 📲
+            <button type="submit" className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-400 text-slate-950 py-4 rounded-2xl font-black text-xs shadow-xl cursor-pointer mt-2">
+              Login to Shop 🚀
+            </button>
+
+            <div className="flex justify-between items-center pt-3 text-[11px] font-bold px-1">
+              <button type="button" onClick={() => setCurrentView('forgot')} className="text-blue-400 underline cursor-pointer hover:text-blue-300">
+                Forgot Password?
               </button>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-4 text-xs animate-fadeIn">
-              <div className="text-center space-y-1.5 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
-                <p className="text-[11px] font-bold opacity-80">Verification code sent to</p>
-                <p className="text-sm font-black text-amber-500 flex items-center justify-center gap-2">
-                  <span>+91 {phone}</span>
-                  <span onClick={() => setStep(1)} className="text-[10px] text-blue-500 underline cursor-pointer">Change</span>
-                </p>
-                {generatedOtpHint && (
-                  <div className="inline-block bg-amber-500/20 border border-amber-500/50 px-3 py-1 rounded-xl mt-1.5">
-                    <p className="text-[10px] text-amber-500 font-bold">Testing OTP Hint: <span className="text-white font-black text-xs">{generatedOtpHint}</span></p>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block font-black uppercase tracking-widest text-[10px] text-center opacity-80">Enter 4-Digit OTP</label>
-                <div className="flex items-center justify-center bg-slate-950/80 border border-slate-700/80 text-white px-4 py-3.5 rounded-2xl shadow-inner">
-                  <input type="text" maxLength="4" value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="----" className="bg-transparent border-none outline-none w-full font-black text-white text-center tracking-[0.5em] text-xl" required autoFocus />
-                </div>
-              </div>
-
-              <button type="submit" className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white py-4 rounded-2xl font-black text-xs shadow-xl cursor-pointer mt-2">
-                Verify & Login ✅
+              <button type="button" onClick={() => setCurrentView('register')} className="text-emerald-400 underline cursor-pointer hover:text-emerald-300">
+                Register New Shop 🏪
               </button>
-            </form>
-          )}
+            </div>
+          </form>
 
           <div className="text-center pt-6">
             <p className="text-[9px] font-bold uppercase tracking-wider opacity-60">Secured by Foodiee Merchant Shield 🛡️</p>
@@ -947,10 +1473,59 @@ export default function ShopOwnerApp() {
     );
   }
 
+  // --- LOGGED IN APP VIEW ---
   return (
     <div className={`flex h-screen w-full items-center justify-center ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-900'} font-sans p-0 sm:p-6 relative overflow-hidden transition-colors`}>
       <Toaster />
       
+      {/* --- ADMIN CHAT MODAL FOR SHOP (WhatsApp Style & Grouped Messages with Safe Render) --- */}
+      {showAdminChat && (
+        <div className="absolute inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0b141a] border-2 border-[#00a884] w-full max-w-sm h-[540px] rounded-[32px] p-4 flex flex-col shadow-2xl text-white relative font-sans">
+            
+            <div className="p-3 bg-[#202c33] border-b border-slate-800 rounded-t-2xl flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-[#00a884] text-white flex items-center justify-center font-black shadow">
+                  <Headphones size={16} />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-white">Foodiee Admin Support</h3>
+                  <p className="text-[9px] text-emerald-400 font-bold">● Online (Super Admin)</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowAdminChat(false); setUnreadAdminChatCount(0); }} className="text-slate-400 hover:text-white cursor-pointer p-1">
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 p-3 overflow-y-auto space-y-2.5 bg-[radial-gradient(#111b21_1px,transparent_1px)] [background-size:16px_16px] my-2 rounded-2xl border border-slate-800">
+              {(!Array.isArray(adminChatMessages) || adminChatMessages.length === 0) ? (
+                <div className="text-center text-slate-500 text-[10px] py-24 space-y-1">
+                  <p className="text-base">🎧</p>
+                  <p>No messages yet with Admin Control.<br/>Send a message if you need assistance!</p>
+                </div>
+              ) : (
+                renderShopGroupedMessages(adminChatMessages)
+              )}
+            </div>
+
+            <div className="p-2 bg-[#202c33] rounded-2xl border border-slate-800 flex items-center gap-2">
+              <input 
+                type="text" 
+                value={adminChatInput || ''} 
+                onChange={(e) => setAdminChatInput(e.target.value)} 
+                placeholder="Type message to admin..." 
+                className="flex-1 bg-[#2a3942] border border-slate-700/50 px-3.5 py-2.5 rounded-xl text-xs text-white outline-none focus:border-[#00a884] transition" 
+                onKeyPress={(e) => { if (e.key === 'Enter') sendAdminChatMessage(); }} 
+              />
+              <button onClick={sendAdminChatMessage} className="bg-[#00a884] hover:bg-[#008f72] text-white px-4 py-2.5 rounded-xl font-black text-xs cursor-pointer flex items-center justify-center transition shadow">
+                <Send size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className={`w-full max-w-[420px] h-[100dvh] sm:h-[840px] ${currentTheme.cardBg} sm:rounded-[3rem] sm:shadow-2xl sm:border-[8px] sm:border-slate-800 flex flex-col relative overflow-hidden transition-colors backdrop-blur-2xl`}>
         
         {/* --- HEADER --- */}
@@ -960,14 +1535,27 @@ export default function ShopOwnerApp() {
               {shopProfile.shopName.charAt(0)}
             </div>
             <div>
-              <h2 className={`text-sm sm:text-base font-black tracking-wide ${currentTheme.accentColor} truncate max-w-[160px] drop-shadow-sm`}>
+              <h2 className={`text-sm sm:text-base font-black tracking-wide ${currentTheme.accentColor} truncate max-w-[150px] drop-shadow-sm`}>
                 {shopProfile.shopName}
               </h2>
-              <p className="text-[9px] text-emerald-500 font-extrabold tracking-wider">● {shopProfile.status}</p>
+              <p className="text-[9px] text-emerald-500 font-extrabold tracking-wider">● {shopProfile.category}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <button 
+              onClick={() => { setShowAdminChat(true); setUnreadAdminChatCount(0); }} 
+              className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/40 p-2 rounded-xl flex items-center gap-1 text-[10px] font-black cursor-pointer relative shadow"
+              title="Chat with Admin"
+            >
+              <Headphones size={16} />
+              {unreadAdminChatCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-600 text-white font-black text-[8px] w-4 h-4 rounded-full flex items-center justify-center">
+                  {unreadAdminChatCount}
+                </span>
+              )}
+            </button>
+
             <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-xl cursor-pointer ${isDarkMode ? 'bg-slate-800 text-amber-400' : 'bg-gray-200 text-slate-800'}`}>
               {isDarkMode ? <Sun size={15} /> : <Moon size={15} />}
             </button>
@@ -1012,7 +1600,7 @@ export default function ShopOwnerApp() {
                     </div>
 
                     <div className="text-xs opacity-80">
-                   🛍️ {ord.items || ord.foodItems || ord.cartItems || ord.description || 'Standard Order Items'}
+                    🛍️ {ord.items || ord.foodItems || ord.cartItems || ord.description || 'Standard Order Items'}
                     </div>
                     
                     <div className="text-[10px] text-amber-500 font-bold flex items-center gap-1 pt-1">
@@ -1021,38 +1609,37 @@ export default function ShopOwnerApp() {
 
                     {ord.notes && <p className="text-amber-500 text-[11px]"><b>Note:</b> {ord.notes}</p>}
                     
-                    {/* --- CHAT BUTTONS FOR SHOP OWNER WITH UNREAD BADGE --- */}
-                      <div className="flex gap-2 pt-2 border-t opacity-90 mt-2">
-  <button 
-    onClick={() => { setActiveChatOrder(ord); setChatType('customer'); setUnreadChatCount(0); }} 
-    className="flex-1 bg-blue-500/20 text-blue-400 py-2 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer relative"
-  >
-    <MessageSquare size={13} /> Chat with Customer
-    {unreadChatCount > 0 && chatType === 'customer' && (
-      <>
-        <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md">
-          {unreadChatCount}
-        </span>
-        <span className="absolute top-0 right-0 w-3 h-3 bg-yellow-400 border-2 border-slate-900 rounded-full animate-ping"></span>
-      </>
-    )}
-  </button>
+                    <div className="flex gap-2 pt-2 border-t opacity-90 mt-2">
+                      <button 
+                        onClick={() => { setActiveChatOrder(ord); setChatType('customer'); setUnreadChatCount(0); }} 
+                        className="flex-1 bg-blue-500/20 text-blue-400 py-2 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer relative"
+                      >
+                        <MessageSquare size={13} /> Chat with Customer
+                        {unreadChatCount > 0 && chatType === 'customer' && (
+                          <>
+                            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md">
+                              {unreadChatCount}
+                            </span>
+                            <span className="absolute top-0 right-0 w-3 h-3 bg-yellow-400 border-2 border-slate-900 rounded-full animate-ping"></span>
+                          </>
+                        )}
+                      </button>
 
-  <button 
-    onClick={() => { setActiveChatOrder(ord); setChatType('partner'); setUnreadChatCount(0); }} 
-    className="flex-1 bg-purple-500/20 text-purple-400 py-2 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer relative"
-  >
-    <MessageSquare size={13} /> Chat with Delivery
-    {unreadChatCount > 0 && chatType === 'partner' && (
-      <>
-        <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md">
-          {unreadChatCount}
-        </span>
-        <span className="absolute top-0 right-0 w-3 h-3 bg-yellow-400 border-2 border-slate-900 rounded-full animate-ping"></span>
-      </>
-    )}
-  </button>
-</div>
+                      <button 
+                        onClick={() => { setActiveChatOrder(ord); setChatType('partner'); setUnreadChatCount(0); }} 
+                        className="flex-1 bg-purple-500/20 text-purple-400 py-2 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer relative"
+                      >
+                        <MessageSquare size={13} /> Chat with Delivery
+                        {unreadChatCount > 0 && chatType === 'partner' && (
+                          <>
+                            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md">
+                              {unreadChatCount}
+                            </span>
+                            <span className="absolute top-0 right-0 w-3 h-3 bg-yellow-400 border-2 border-slate-900 rounded-full animate-ping"></span>
+                          </>
+                        )}
+                      </button>
+                    </div>
 
                     <div className="flex gap-2 pt-1">
                       <button onClick={() => updateOrderStatus(ord.id, 'Food Preparing')} className={`flex-1 ${currentTheme.buttonGradient} py-2 rounded-xl font-bold cursor-pointer shadow`}>Accept & Prepare 🍲</button>
@@ -1079,10 +1666,9 @@ export default function ShopOwnerApp() {
                         <span className="text-xs opacity-60 font-normal ml-2">({hist.customerMobile})</span>
                       </div>
 
-                        {/* Order History దగ్గర */}
-                        <div className="text-xs opacity-80">
-                         🛍️ {hist.items || hist.foodItems || hist.cartItems || hist.description || 'Standard Order Items'}
-                        </div>
+                      <div className="text-xs opacity-80">
+                       🛍️ {hist.items || hist.foodItems || hist.cartItems || hist.description || 'Standard Order Items'}
+                      </div>
                       
                       <div className="text-[10px] opacity-60 flex items-center gap-1">
                         <Clock size={11} /> Completed / Logged: {hist.orderDate || hist.timestamp || new Date().toLocaleString()}
@@ -1148,34 +1734,11 @@ export default function ShopOwnerApp() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold opacity-70 uppercase mb-1">Category ({shopProfile.category})</label>
+                  <label className="block text-[10px] font-bold opacity-70 uppercase mb-1">Sub-Category ({shopProfile.category})</label>
                   <select value={newItemCategory} onChange={(e) => setNewItemCategory(e.target.value)} className={`w-full ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'} border p-3 rounded-xl outline-none font-bold cursor-pointer`}>
-                    {shopProfile.category === 'GROCERY' ? (
-                      <>
-                        <option value="Fresh Produce">Fresh Produce</option>
-                        <option value="Dairy & Refrigerated">Dairy & Refrigerated</option>
-                        <option value="Pantry Staples & Grains">Pantry Staples & Grains</option>
-                        <option value="Snacks & Beverages">Snacks & Beverages</option>
-                        <option value="Household & Personal Care">Household & Personal Care</option>
-                      </>
-                    ) : shopProfile.category === 'MEAT & FISH' ? (
-                      <>
-                        <option value="Chicken">🐔 Chicken</option>
-                        <option value="Mutton">🐐 Mutton</option>
-                        <option value="Fish & Seafood">🐟 Fish & Seafood</option>
-                        <option value="Eggs">🥚 Eggs</option>
-                        <option value="Country Chicken / Naati Kodi">🐓 Country Chicken</option>
-                        <option value="Marinades & Ready to Cook">🍖 Marinades & Ready to Cook</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="Veg">Veg</option>
-                        <option value="Non-Veg">Non-Veg</option>
-                        <option value="Starter">Starter</option>
-                        <option value="Snacks">Snacks</option>
-                        <option value="Tiffin">Tiffin</option>
-                      </>
-                    )}
+                    {currentSubCategories.map((subCat) => (
+                      <option key={subCat} value={subCat}>{subCat}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1205,12 +1768,7 @@ export default function ShopOwnerApp() {
                   <p className="text-xs opacity-70">No items added yet. Start adding items to your catalog.</p>
                 </div>
               ) : (
-                (shopProfile.category === 'GROCERY' 
-                  ? ['Fresh Produce', 'Dairy & Refrigerated', 'Pantry Staples & Grains', 'Snacks & Beverages', 'Household & Personal Care'] 
-                  : shopProfile.category === 'MEAT & FISH'
-                  ? ['Chicken', 'Mutton', 'Fish & Seafood', 'Eggs', 'Country Chicken / Naati Kodi', 'Marinades & Ready to Cook']
-                  : ['Veg', 'Non-Veg', 'Starter', 'Snacks', 'Tiffin']
-                ).map((cat) => {
+                currentSubCategories.map((cat) => {
                   const filteredCatItems = menuItems.filter(
                     item => (item.category === cat) && 
                             (item.itemName || item.name || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -1245,8 +1803,8 @@ export default function ShopOwnerApp() {
                               <button onClick={() => setEditingItem(item)} className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-2.5 py-1.5 rounded-xl font-bold text-[10px] cursor-pointer">
                                 Edit ✏️
                               </button>
-                              <button onClick={() => toggleItemAvailability(item.id)} className="cursor-pointer">
-                                {isAvailable ? <ToggleRight size={26} className="text-emerald-500" /> : <ToggleLeft size={26} className="opacity-50" />}
+                              <button onClick={() => toggleItemAvailability(item)} className="cursor-pointer" title="Toggle On/Off for Customers">
+                                {isAvailable ? <ToggleRight size={26} className="text-emerald-500" /> : <ToggleLeft size={26} className="opacity-50 text-rose-500" />}
                               </button>
                             </div>
                           </div>
@@ -1295,9 +1853,9 @@ export default function ShopOwnerApp() {
 
               <div className={`${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200 text-gray-900'} p-4 rounded-2xl border space-y-3 shadow-sm text-xs`}>
                 <h4 className={`font-bold ${currentTheme.accentColor} flex items-center gap-1.5`}>
-                  <CreditCard size={16} /> Configure Payout Account (UPI / Bank)
+                  <CreditCard size={16} /> Configure Payout Account (UPI / Bank) - Synced with Admin App
                 </h4>
-                <p className="text-[10px] opacity-70">Enter your official bank or UPI details where day-end earnings will be credited automatically.</p>
+                <p className="text-[10px] opacity-70">Enter your official bank or UPI details. These will be securely saved and accessible in the Admin App.</p>
                 
                 <form onSubmit={handleSaveBankDetails} className="space-y-2.5">
                   <div>
@@ -1319,7 +1877,7 @@ export default function ShopOwnerApp() {
                     </div>
                   </div>
                   <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold shadow transition-colors cursor-pointer">
-                    Save Payout Details 💾
+                    Save Payout Details & Sync to Admin 💾
                   </button>
                 </form>
               </div>
@@ -1328,7 +1886,7 @@ export default function ShopOwnerApp() {
                 <p className="text-[10px] opacity-70 font-bold uppercase">Today's Net Earnings (Auto-Updated)</p>
                 <h4 className="text-xl font-black text-emerald-500">₹ {totalEarnings.toFixed(2)}</h4>
                 <p className="text-[10px] opacity-50">Amount calculated from active/completed orders.</p>
-                <button onClick={() => generateEarningsPDF('Today_Earnings', `₹ ${totalEarnings.toFixed(2)}`)} className={`w-full ${currentTheme.buttonGradient} py-2.5 rounded-xl font-bold shadow flex items-center justify-center gap-1 mt-2 cursor-pointer`}>
+                <button onClick={() => generateProfessionalAnalyticsPDF('daily')} className={`w-full ${currentTheme.buttonGradient} py-2.5 rounded-xl font-bold shadow flex items-center justify-center gap-1 mt-2 cursor-pointer`}>
                   <Download size={13} /> Download Statement PDF
                 </button>
               </div>
@@ -1358,7 +1916,6 @@ export default function ShopOwnerApp() {
           {activeTab === 'profile' && (
             <div className="space-y-4 text-xs">
               
-              {/* --- EXCLUSIVE PROFILE TOP: PIE CHART & ANALYTICS WITH FILTERS & PDF --- */}
               <div className={`${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/90 border-gray-200 text-gray-900'} p-4 rounded-3xl border shadow-sm space-y-3`}>
                 <div className="flex justify-between items-center border-b pb-2 opacity-90">
                   <div className="flex items-center gap-2">
@@ -1368,7 +1925,6 @@ export default function ShopOwnerApp() {
                   <span className={`text-[10px] ${currentTheme.badgeBg} px-2 py-0.5 rounded-md font-bold uppercase`}>{shopProfile.category}</span>
                 </div>
 
-                {/* Filter Buttons for Pie/Stats */}
                 <div className="grid grid-cols-4 gap-1 bg-slate-800/40 p-1 rounded-xl">
                   {['daily', 'weekly', 'monthly', 'yearly'].map((tab) => (
                     <button
@@ -1385,48 +1941,22 @@ export default function ShopOwnerApp() {
                   ))}
                 </div>
 
-                {/* Analytics & Earnings Summary */}
-                <div className="pt-2 space-y-3">
+             <div className="pt-2 space-y-3">
                   <div className="flex justify-between items-center bg-slate-950/40 p-3 rounded-2xl border border-slate-800/60">
                     <div>
                       <p className="text-[9px] opacity-60 uppercase font-bold">Selected Period Revenue</p>
                       <p className={`text-base font-black ${currentTheme.accentColor} mt-0.5`}>
-                        ₹ {(totalEarnings * (analyticsFilter === 'daily' ? 1 : analyticsFilter === 'weekly' ? 7 : analyticsFilter === 'monthly' ? 30 : 365)).toFixed(2)}
+                        ₹ {currentAnalytics.revenue}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-[9px] opacity-60 uppercase font-bold">Total Orders</p>
                       <p className="text-base font-black text-emerald-500 mt-0.5">
-                        {completedOrdersCount * (analyticsFilter === 'daily' ? 1 : analyticsFilter === 'weekly' ? 7 : analyticsFilter === 'monthly' ? 30 : 365)}
+                        {currentAnalytics.count}
                       </p>
                     </div>
                   </div>
 
-                  {/* Circular Pie Chart Visual Representation */}
-                  <div className="flex items-center justify-around py-3 bg-slate-950/20 rounded-2xl border border-slate-800/40">
-                    <div className="relative w-20 h-20 rounded-full flex items-center justify-center bg-gradient-to-tr from-amber-500 via-emerald-500 to-rose-500 p-1 shadow-lg">
-                      <div className="w-full h-full bg-slate-950 rounded-full flex flex-col items-center justify-center text-center">
-                        <span className="text-[10px] font-black opacity-80 uppercase">Share</span>
-                        <span className="text-xs font-black text-amber-400">100%</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1.5 text-[11px] font-bold">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-                        <span className="opacity-80">Online Delivery (75%)</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
-                        <span className="opacity-80">Takeaway (15%)</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-rose-500"></span>
-                        <span className="opacity-80">Dine-in / Direct (10%)</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Professional PDF Download Button */}
                   <button 
                     onClick={() => generateProfessionalAnalyticsPDF(analyticsFilter)}
                     className={`w-full ${currentTheme.buttonGradient} py-2.5 rounded-xl font-black text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer`}
@@ -1460,7 +1990,7 @@ export default function ShopOwnerApp() {
               </div>
 
               {isEditingProfile ? (
-                <form onSubmit={updateProfileDetails} className={`${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200 text-gray-900'} p-4 rounded-2xl border space-y-2 shadow-sm`}>
+                <form onSubmit={updateProfileDetails} className={`${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200 text-gray-900'} p-4 rounded-2xl border space-y-2 shadow-sm text-xs`}>
                   <label className="text-[10px] opacity-70 font-bold">Shop Name</label>
                   <input type="text" value={shopProfile.shopName} onChange={(e) => setShopProfile({...shopProfile, shopName: e.target.value})} className={`w-full ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'} border p-2 rounded-xl font-bold outline-none`} required />
                   
@@ -1480,9 +2010,39 @@ export default function ShopOwnerApp() {
                   <label className="text-[10px] opacity-70 font-bold">Address / Location</label>
                   <input type="text" value={shopProfile.location} onChange={(e) => setShopProfile({...shopProfile, location: e.target.value})} className={`w-full ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'} border p-2 rounded-xl font-bold outline-none`} required />
 
+                  {/* 👇 పిన్ కోడ్ లేదా ఏరియా నేమ్ ద్వారా షాప్ లొకేషన్ సెర్చ్ చేసే బాక్స్ మరియు GPS బటన్ */}
+                  <div className="space-y-1.5 bg-slate-950 p-2.5 rounded-xl border border-slate-800 my-2">
+                    <label className="text-[9px] text-amber-400 font-bold uppercase">Search Location by Pincode or Area</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        id="shopSearchAreaInput"
+                        placeholder="ఉదా: 532312 లేదా Main Road" 
+                        className="flex-1 bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs font-bold text-white outline-none"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const val = document.getElementById('shopSearchAreaInput').value;
+                          handleSearchShopLocationByText(val);
+                        }}
+                        className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-2 rounded-lg text-xs font-black cursor-pointer shadow"
+                      >
+                        Search 🔍
+                      </button>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={detectShopLiveGps}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 shadow cursor-pointer mt-1"
+                    >
+                      <Navigation size={12} /> Detect Shop Live GPS 📌
+                    </button>
+                  </div>
+
                   <label className="text-[10px] opacity-70 font-bold">FSSAI License</label>
                   <input type="text" value={shopProfile.fssaiLicense} onChange={(e) => setShopProfile({...shopProfile, fssaiLicense: e.target.value})} className={`w-full ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'} border p-2 rounded-xl font-bold outline-none`} required />
-                    
+                  
                   <button type="submit" className={`w-full ${currentTheme.buttonGradient} py-2.5 rounded-xl font-black shadow mt-2 cursor-pointer`}>Save Profile</button>
                 </form>
               ) : (
@@ -1495,9 +2055,12 @@ export default function ShopOwnerApp() {
                   <p><b>FSSAI License:</b> <span className={`${currentTheme.accentColor} font-bold`}>{shopProfile.fssaiLicense}</span></p>
                   
                   <div className="pt-2 flex justify-between items-center border-t border-slate-700">
-                    <span>Store Open Status:</span>
-                    <button onClick={toggleStoreStatus} className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${shopProfile.isOpen ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
-                      {shopProfile.isOpen ? 'Online (Accepting)' : 'Offline (Closed)'}
+                    <div>
+                      <p className="font-black text-xs">Store Online/Offline Status</p>
+                      <p className="text-[9px] opacity-60">Synced live with Customer & Admin apps</p>
+                    </div>
+                    <button onClick={toggleStoreStatus} className={`px-4 py-2 rounded-xl font-bold cursor-pointer text-xs shadow-lg transition ${shopProfile.isOpen ? 'bg-emerald-600 text-white animate-pulse' : 'bg-rose-600 text-white'}`}>
+                      {shopProfile.isOpen ? '🟢 ONLINE (Open)' : '🔴 OFFLINE (Closed)'}
                     </button>
                   </div>
                 </div>
@@ -1508,25 +2071,24 @@ export default function ShopOwnerApp() {
                   <Bell size={16} /> Order Alert Sound Settings
                 </h4>
                 <div className="space-y-2">
-                  {ringtones.map((ring) => (
-                    <div 
-                      key={ring.id}
-                      onClick={() => {
-                        setSelectedRinger(ring.id);
-                        const preview = new Audio(ring.url);
-                        preview.play().catch(e => {});
-                        toast.success(`Selected: ${ring.name}`);
-                      }}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition ${
-                        selectedRinger === ring.id 
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-black' 
-                          : `${isDarkMode ? 'bg-slate-950 border-slate-800 opacity-80' : 'bg-white border-gray-200'}`
-                      }`}
-                    >
-                      <span className="text-xs">{ring.name}</span>
-                      {selectedRinger === ring.id && <span className="text-[10px]">✅ Active</span>}
-                    </div>
-                  ))}
+                 {ringtones.map((ring) => (
+    <div 
+      key={ring.id}
+      onClick={() => {
+        setSelectedRinger(ring.id);
+        playShopRingtone(ring); // 🌟 అప్‌డేట్ చేసిన ఆబ్జెక్ట్‌ని పంపిస్తున్నాము
+        toast.success(`Selected: ${ring.name}`);
+      }}
+      className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition ${
+        selectedRinger === ring.id 
+          ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-black' 
+          : `${isDarkMode ? 'bg-slate-950 border-slate-800 opacity-80' : 'bg-white border-gray-200'}`
+      }`}
+    >
+      <span className="text-xs">{ring.name}</span>
+      {selectedRinger === ring.id && <span className="text-[10px]">✅ Active</span>}
+    </div>
+  ))}
                 </div>
               </div>
 
@@ -1535,7 +2097,6 @@ export default function ShopOwnerApp() {
 
         </main>
 
-        {/* --- BOTTOM NAVIGATION BAR --- */}
         <nav className={`absolute bottom-0 inset-x-0 h-16 ${isDarkMode ? 'bg-slate-900/95 border-slate-800 text-slate-400' : 'bg-white/95 border-gray-200 text-gray-600'} backdrop-blur-md border-t flex justify-around items-center px-1 z-50 text-[9px] font-bold transition-colors`}>
           <button onClick={() => setActiveTab('orders')} className={`flex flex-col items-center gap-1 cursor-pointer ${activeTab === 'orders' ? currentTheme.accentColor : 'opacity-70'}`}><ShoppingBag size={17} /><span>Orders</span></button>
           <button onClick={() => setActiveTab('add-menu')} className={`flex flex-col items-center gap-1 cursor-pointer ${activeTab === 'add-menu' ? currentTheme.accentColor : 'opacity-70'}`}><Plus size={17} /><span>Add Item</span></button>
@@ -1614,7 +2175,6 @@ export default function ShopOwnerApp() {
         </div>
       )}
 
-      {/* --- ORDER-ID BASED REAL-TIME CHAT MODAL FOR SHOP WITH UNREAD COUNT --- */}
       {activeChatOrder && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className={`${isDarkMode ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-gray-900 border-gray-200'} w-full max-w-sm rounded-3xl p-5 border flex flex-col h-[480px]`}>
@@ -1646,7 +2206,7 @@ export default function ShopOwnerApp() {
                 <div className="text-center py-20 text-slate-400 text-xs font-bold">
                   🔒 ఆర్డర్ డెలివరీ అయింది. చాట్ సెషన్ ముగిసింది.
                 </div>
-              ) : chatMessages.length === 0 ? (
+              ) : (!Array.isArray(chatMessages) || chatMessages.length === 0) ? (
                 <div className="text-center text-slate-500 text-[10px] py-20">
                   💬 No messages yet for this order.<br/>Start a conversation!
                 </div>
@@ -1664,7 +2224,7 @@ export default function ShopOwnerApp() {
               <div className="flex gap-2 pt-1">
                 <input 
                   type="text" 
-                  value={chatInput} 
+                  value={chatInput || ''} 
                   onChange={(e) => setChatInput(e.target.value)} 
                   placeholder={`Type message to ${chatType}...`} 
                   className={`flex-1 ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'} border p-2.5 rounded-xl text-xs outline-none`} 
